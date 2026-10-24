@@ -8,7 +8,7 @@ from typing import List, Optional
 
 from PIL import Image, ImageDraw, ImageFont
 
-from .types import Block, Piece, SlideSummary
+from .types import Block, Piece, SlideSummary  # noqa: F401
 
 
 def render_preview(background: Image.Image, pieces: List[Piece], blocks: List[Block], measurer) -> Image.Image:
@@ -58,8 +58,9 @@ def _b64(img: Image.Image, fmt="JPEG") -> str:
     return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
-def write_html_report(path: str, title: str, summaries: List[SlideSummary], previews: List[Optional[Image.Image]],
+def write_html_report(path: str, title: str, summaries: List[SlideSummary], previews: List[Optional[str]],
                       cost_line: str, lang: str = "ko") -> str:
+    """`previews` are image paths (or None) matching `summaries`."""
     ko = lang == "ko"
     head = ["#", "상태" if ko else "status", "줄" if ko else "lines", "블록" if ko else "blocks",
             "그림" if ko else "pieces", "시간(s)" if ko else "sec", "경고" if ko else "warnings"]
@@ -67,7 +68,7 @@ def write_html_report(path: str, title: str, summaries: List[SlideSummary], prev
     for s, pv in zip(summaries, previews):
         cls = {"ok": "ok", "text_layer": "ok", "passthrough": "pass", "failed": "fail"}.get(s.status, "")
         warn = "; ".join(s.warnings)
-        img_html = f'<img src="{_b64(pv)}" loading="lazy">' if pv is not None else ""
+        img_html = f'<img src="{_b64(Image.open(pv))}" loading="lazy">' if pv else ""
         texts = "<br>".join(html.escape(t) for t in s.texts[:12])
         rows.append(f"""<tr class="{cls}"><td>{s.index}</td><td>{html.escape(s.status)}</td><td>{s.n_lines}</td>
 <td>{s.n_blocks}</td><td>{s.n_pieces}</td><td>{s.seconds:.1f}</td><td>{html.escape(warn)}</td></tr>

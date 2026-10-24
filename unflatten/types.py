@@ -44,6 +44,8 @@ class Block:
     pitch_px: float = 0.0
     highlights: List[str] = field(default_factory=list)
     highlight_color: Optional[str] = None   # hex, e.g. "FFF59D"
+    ink_h: float = 0.0                       # median stroke height of the lines (px) — raw measurement
+    size_known: bool = False                 # True when font_px came from the PDF text layer (exact)
 
     def to_dict(self):
         return asdict(self)

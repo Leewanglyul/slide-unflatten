@@ -173,6 +173,30 @@ class FontMeasurer:
         return widest, max(ink_h, 1.0)
 
 
+# ───────────── font fitting ─────────────
+def fit_font(b: Block, measurer: Optional[FontMeasurer], ink_ratio: float = 0.92) -> None:
+    """Set b.font_px so the chosen font fills the original box in both width and height."""
+    ink_h = b.ink_h or (b.box[3] - b.box[1])
+    b.font_px = ink_h / ink_ratio
+    m = measurer.measure(b.text, b.bold or b.role == "title") if measurer else None
+    if m:
+        w100, h100 = m
+        target_w = b.box[2] - b.box[0]
+        by_w = target_w * 100.0 / w100 if w100 > 0 else b.font_px
+        by_h = ink_h * 100.0 / h100
+        est = min(by_w * 1.04, by_h)             # trust the height, never overflow the width
+        if est > 0:
+            b.font_px = float(est)
+
+
+def refit_fonts(blocks: List[Block], measurer: FontMeasurer, ink_ratio: float = 0.92) -> List[Block]:
+    """Called at assembly time: sizes measured with another font (or cached) are re-fitted to the current one."""
+    for b in blocks:
+        if not b.size_known and b.ink_h > 0:
+            fit_font(b, measurer, ink_ratio)
+    return blocks
+
+
 # ───────────── finalize ─────────────
 def finalize_blocks(blocks: List[Block], lines: List[Line], arr: np.ndarray, measurer: FontMeasurer,
                     ink_ratio: float = 0.92) -> List[Block]:
@@ -184,22 +208,13 @@ def finalize_blocks(blocks: List[Block], lines: List[Line], arr: np.ndarray, mea
         n = b.text.count("\n") + 1
         heights = sorted(l.box[3] - l.box[1] for l in ls)
         ink_h = heights[len(heights) // 2]
+        b.ink_h = float(ink_h)
         known = [l.font_px for l in ls if l.font_px]
         if known:                                   # PDF text layer: exact size
             b.font_px = float(sorted(known)[len(known) // 2])
+            b.size_known = True
         else:
-            b.font_px = ink_h / ink_ratio
-            heavy = b.bold or b.role == "title"
-            m = measurer.measure(b.text, heavy)
-            if m:                                   # fit the measured glyphs to the box (width AND height)
-                w100, h100 = m
-                target_w = b.box[2] - b.box[0]
-                by_w = target_w * 100.0 / w100 if w100 > 0 else b.font_px
-                by_h = ink_h * 100.0 / h100
-                # single line: trust the height, but never overflow the width
-                est = min(by_w * 1.04, by_h) if n == 1 else min(by_w * 1.04, by_h * 1.0)
-                if est > 0:
-                    b.font_px = float(est)
+            fit_font(b, measurer, ink_ratio)
         if n > 1:
             b.pitch_px = (b.box[3] - b.box[1] - ink_h) / (n - 1)
         known_col = [l.color for l in ls if l.color is not None]

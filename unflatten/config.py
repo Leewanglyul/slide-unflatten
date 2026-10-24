@@ -139,9 +139,9 @@ class Config:
         return key or None
 
     def cache_key_fields(self) -> dict:
-        """The parts of the config that change recognition results (not just assembly)."""
-        return {"mode": self.mode, "language": self.language, "model": self.model if self.use_claude else None,
-                "ocr": self.ocr_backend, "dpi": self.pdf_dpi, "watermark": self.remove_watermark}
+        """Config parts that change recognition results (not assembly). Which OCR/Claude backend actually ran
+        is added by the pipeline (resolved at run time), so degraded runs never masquerade as full ones."""
+        return {"mode": self.mode, "language": self.language, "dpi": self.pdf_dpi, "watermark": self.remove_watermark}
 
     def to_dict(self) -> dict:
         d = asdict(self)

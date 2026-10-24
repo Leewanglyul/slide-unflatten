@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import hashlib
-import io
 import json
 import os
 from typing import List, Tuple
@@ -19,12 +18,14 @@ class SlideCache:
         os.makedirs(root, exist_ok=True)
 
     @staticmethod
-    def key(image: Image.Image, cfg) -> str:
+    def key(image: Image.Image, cfg, ocr_backend: str = "none", claude: bool = False, model: str = "") -> str:
+        """Hash of the pixels + the recognition config + the backends that will actually run."""
+        img = image.convert("RGB")
         h = hashlib.sha1()
-        buf = io.BytesIO()
-        image.convert("RGB").save(buf, format="PNG")
-        h.update(buf.getvalue())
-        h.update(json.dumps(cfg.cache_key_fields(), sort_keys=True).encode())
+        h.update(f"{img.width}x{img.height}".encode())
+        h.update(np.asarray(img).tobytes())
+        fields = dict(cfg.cache_key_fields(), ocr=ocr_backend, claude=claude, model=model if claude else "")
+        h.update(json.dumps(fields, sort_keys=True).encode())
         return h.hexdigest()[:20]
 
     def _dir(self, key: str) -> str:
@@ -48,6 +49,10 @@ class SlideCache:
             plist.append(q.to_dict())
         with open(os.path.join(d, "analysis.json"), "w", encoding="utf-8") as f:
             json.dump({"analysis": analysis.to_dict(), "pieces": plist}, f, ensure_ascii=False, indent=1)
+
+    def load_analysis(self, key: str) -> SlideAnalysis:
+        with open(os.path.join(self._dir(key), "analysis.json"), encoding="utf-8") as f:
+            return SlideAnalysis.from_dict(json.load(f)["analysis"])
 
     def load(self, key: str) -> Tuple[SlideAnalysis, Image.Image, List[Piece]]:
         d = self._dir(key)

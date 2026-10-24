@@ -112,6 +112,10 @@ tests/           합성 슬라이드로 전 경로 회귀 테스트 (GPU·API �
 notebooks/       Colab 노트북 (얇은 껍데기)
 ```
 
+## 캐시
+
+CLI는 출력 폴더의 `.unflatten-cache/`, 웹 UI는 `~/.cache/unflatten/`(환경변수 `UNFLATTEN_CACHE`로 변경)에 슬라이드별 인식 결과를 둡니다. 키는 슬라이드 픽셀 + 인식 설정 + 실제로 돈 백엔드(OCR 종류·Claude 사용 여부·모델)이므로, 키 없이 돌린 결과가 나중에 Claude 결과인 척 재사용되지 않습니다. 재조립은 manifest의 키를 그대로 씁니다.
+
 ## 한계
 
 - 사진 배경 슬라이드는 그림 분리를 건너뜁니다(글자만 분리).

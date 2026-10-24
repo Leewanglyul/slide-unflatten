@@ -1,10 +1,25 @@
 """One-screen Gradio UI: upload → options → estimate → convert → preview → download. Also rebuild + text fixes."""
 from __future__ import annotations
 
+import atexit
 import json
 import os
+import shutil
 import tempfile
 from typing import List
+
+CACHE_DIR = os.environ.get("UNFLATTEN_CACHE", os.path.join(os.path.expanduser("~"), ".cache", "unflatten"))
+_SESSION_DIR = tempfile.mkdtemp(prefix="unflatten_ui_")        # one per process, removed on exit
+atexit.register(lambda: shutil.rmtree(_SESSION_DIR, ignore_errors=True))
+
+
+def _path(f) -> str:
+    """Gradio hands back str paths or objects with .name depending on version."""
+    return f if isinstance(f, str) else getattr(f, "name", str(f))
+
+
+def _job_dir() -> str:
+    return tempfile.mkdtemp(prefix="job_", dir=_SESSION_DIR)
 
 from .config import Config, LANGUAGE_PROFILES, MODELS, PRESETS
 from .fonts import assign_font_files
@@ -37,11 +52,11 @@ def _cfg(mode_label, lang_label, model_label, use_claude, key, font_files, slide
     mode = next((k for k, v in PRESETS.items() if v[f"label_{ui_lang}"] == mode_label), "full")
     lang = next((k for k, v in LANGUAGE_PROFILES.items() if v["label"] == lang_label), "ko")
     model = next((k for k, v in MODELS.items() if v["label"] == model_label), "claude-opus-5-5")
-    reg, bold = assign_font_files([f.name if hasattr(f, "name") else f for f in (font_files or [])])
+    reg, bold = assign_font_files([_path(f) for f in (font_files or [])])
     return Config(mode=mode, language=lang, model=model, use_claude=bool(use_claude), api_key=(key or "").strip() or None,
                   font_regular_file=reg, font_bold_file=bold, slide_range=(slides or "").strip() or None,
                   keep_hidden_original=hidden, group_shapes=groups, use_theme_fonts=theme, remove_watermark=wm,
-                  body_word_wrap=wrap, ui_lang=ui_lang, out_dir=tempfile.mkdtemp(prefix="unflatten_"))
+                  body_word_wrap=wrap, ui_lang=ui_lang, out_dir=_job_dir(), cache_dir=CACHE_DIR)
 
 
 def build_demo(ui_lang: str = "ko"):
@@ -87,8 +102,8 @@ def build_demo(ui_lang: str = "ko"):
                     cfg = _cfg(*opts, ui_lang)
                     lines = []
                     for f in files:
-                        info = estimate(f.name, cfg)
-                        lines.append(f"{os.path.basename(f.name)}: " + S["est_fmt"].format(
+                        info = estimate(_path(f), cfg)
+                        lines.append(f"{os.path.basename(_path(f))}: " + S["est_fmt"].format(
                             n=info["n_flat"] + info["n_text_layer"], t=info["n_text_layer"], p=info["n_pass"],
                             m=info["minutes"], usd=info["usd"], krw=info["krw"]))
                     return "\n".join(lines)
@@ -100,19 +115,19 @@ def build_demo(ui_lang: str = "ko"):
                     logs: List[str] = []
                     outs, imgs, rows = [], [], []
                     for f in files:
-                        name = os.path.basename(f.name)
+                        name = os.path.basename(_path(f))
 
                         def prog(done, total, msg):
                             progress((done, max(total, 1)), desc=f"{name} {msg}")
 
-                        res = convert(f.name, cfg, progress=prog, log=lambda m: logs.append(str(m)))
+                        res = convert(_path(f), cfg, progress=prog, log=lambda m: logs.append(str(m)))
                         outs.append(res.out_path)
                         if res.report_path:
                             outs.append(res.report_path)
                         outs.append(res.manifest_path)
                         if res.font_files:
                             outs.append(bundle_zip(res))
-                        imgs += [(pv, f"{name} #{s.index}") for s, pv in zip(res.summaries, res.previews) if pv is not None]
+                        imgs += [(pv, f"{name} #{s.index}") for s, pv in zip(res.summaries, res.previews) if pv]
                         rows += [[name, s.index, s.status, s.n_lines, s.n_blocks, s.n_pieces, round(s.seconds, 1), "; ".join(s.warnings)]
                                  for s in res.summaries]
                         logs.append(res.cost_line(ui_lang))
@@ -134,7 +149,8 @@ def build_demo(ui_lang: str = "ko"):
                 def load_texts(mf):
                     if not mf:
                         return None
-                    man = json.load(open(mf.name, encoding="utf-8"))
+                    with open(_path(mf), encoding="utf-8") as fh:
+                        man = json.load(fh)
                     rows = []
                     for s in man["slides"]:
                         for bi, txt in enumerate(s.get("texts") or []):
@@ -145,7 +161,8 @@ def build_demo(ui_lang: str = "ko"):
                 def save_texts(mf, df):
                     if not mf or df is None:
                         return S["no_files"]
-                    man = json.load(open(mf.name, encoding="utf-8"))
+                    with open(_path(mf), encoding="utf-8") as fh:
+                        man = json.load(fh)
                     cache = SlideCache(man["cache_dir"])
                     by_slide = {}
                     for _, r in df.iterrows():
@@ -156,11 +173,18 @@ def build_demo(ui_lang: str = "ko"):
                             analysis, _, _ = cache.load(s["cache_key"])
                             for bi, txt in by_slide[s["index"]].items():
                                 if bi < len(analysis.blocks):
-                                    analysis.blocks[bi].text = txt.replace(" / ", "\n")
+                                    analysis.blocks[bi].text = txt.replace(" ⏎ ", "\n")
                                     n += 1
                             cache.update_blocks(s["cache_key"], analysis.blocks)
-                            s["texts"] = [b.text.replace("\n", " / ") for b in analysis.blocks]
-                    json.dump(man, open(mf.name, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+                            s["texts"] = [b.text.replace("\n", " ⏎ ") for b in analysis.blocks]
+                    # write back to the uploaded copy AND to the manifest next to the real output
+                    targets = {_path(mf)}
+                    real = os.path.join(os.path.dirname(man.get("output", "")), os.path.basename(_path(mf)))
+                    if man.get("output") and os.path.isdir(os.path.dirname(man["output"])):
+                        targets.add(real)
+                    for tpath in targets:
+                        with open(tpath, "w", encoding="utf-8") as fh:
+                            json.dump(man, fh, ensure_ascii=False, indent=1)
                     return f"saved {n} blocks → rebuild to apply"
 
                 load_btn.click(load_texts, man_fix, fix_table)
@@ -178,12 +202,12 @@ def build_demo(ui_lang: str = "ko"):
                 def do_rebuild(mf, ff, g, th, hd, progress=gr.Progress()):
                     if not mf:
                         return S["no_files"], None
-                    reg, bold = assign_font_files([f.name for f in (ff or [])])
+                    reg, bold = assign_font_files([_path(f) for f in (ff or [])])
                     ov = {"group_shapes": g, "use_theme_fonts": th, "keep_hidden_original": hd}
                     if reg:
                         ov["font_regular_file"], ov["font_bold_file"] = reg, bold
                     logs = []
-                    res = rebuild(mf.name, ov, progress=lambda d, t, m: progress((d, max(t, 1)), desc=m), log=lambda m: logs.append(str(m)))
+                    res = rebuild(_path(mf), ov, progress=lambda d, t, m: progress((d, max(t, 1)), desc=m), log=lambda m: logs.append(str(m)))
                     outs = [res.out_path] + ([res.report_path] if res.report_path else [])
                     return "\n".join(logs[-20:]), outs
 

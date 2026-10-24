@@ -143,20 +143,22 @@ def _style_run(run, size_pt: float, bold: bool, color, font_name: str, theme_ref
     f.name = latin
     ea_el = rPr.makeelement(qn("a:ea"), {"typeface": ea})
     rPr.append(ea_el)
-    cs_el = rPr.makeelement(qn("a:cs"), {"typeface": ea})
+    cs_el = rPr.makeelement(qn("a:cs"), {"typeface": theme_ref + "-cs" if theme_ref else font_name})
     rPr.append(cs_el)
 
 
 # ───────────── main entry ─────────────
-def build_slide(slide, src: Image.Image, background: Image.Image, pieces: List[Piece], blocks: List[Block],
+def build_slide(slide, src: Optional[Image.Image], background: Image.Image, pieces: List[Piece], blocks: List[Block],
                 cfg, plan: FontPlan, rect_emu: Optional[Tuple[int, int, int, int]], slide_wh: Tuple[int, int],
-                pdf_font_names: bool = False):
-    """Populate `slide` with the editable layers of one flattened slide."""
+                pdf_font_names: bool = False, orig_shape_id: Optional[int] = None):
+    """Populate `slide` with the editable layers of one flattened slide.
+    `orig_shape_id`: an existing picture shape (PPTX source) that is kept, hidden and lossless instead of
+    being re-added as JPEG; `src` is only read when there is no such shape."""
     sw, sh = slide_wh
     if rect_emu is None:
         rect_emu = (0, 0, sw, sh)
     rl, rt, rw, rh = rect_emu
-    sx, sy = rw / src.width, rh / src.height
+    sx, sy = rw / background.width, rh / background.height
 
     def X(px):  # noqa: E743
         return Emu(int(rl + px * sx))
@@ -174,11 +176,19 @@ def build_slide(slide, src: Image.Image, background: Image.Image, pieces: List[P
         return Emu(max(1, int(px * sy)))
 
     labels = LABELS.get(cfg.ui_lang, LABELS["en"])
+    existing = next((sh for sh in slide.shapes if orig_shape_id is not None and sh.shape_id == orig_shape_id), None)
     if cfg.keep_hidden_original:
-        orig = slide.shapes.add_picture(to_jpg(src), Emu(rl), Emu(rt), Emu(rw), Emu(rh))
-        orig.name = labels["orig"]
-        _alt(orig, labels["orig"])
-        _hide(orig)
+        if existing is not None:
+            existing.name = labels["orig"]
+            _alt(existing, labels["orig"])
+            _hide(existing)
+        elif src is not None:
+            orig = slide.shapes.add_picture(to_jpg(src), Emu(rl), Emu(rt), Emu(rw), Emu(rh))
+            orig.name = labels["orig"]
+            _alt(orig, labels["orig"])
+            _hide(orig)
+    elif existing is not None:
+        existing._element.getparent().remove(existing._element)
 
     bg = slide.shapes.add_picture(to_jpg(upscale(background, cfg.upscale)), Emu(rl), Emu(rt), Emu(rw), Emu(rh))
     bg.name = labels["bg"]

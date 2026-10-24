@@ -1,15 +1,19 @@
 """Load PPTX / PDF / images into a uniform list of slides.
 
-Detects which slides are really "flattened" (one picture covering the slide and no real text)
-so already-editable slides pass through untouched, keeps notes and the original geometry,
-and reads the PDF text layer when there is one (no OCR, no API cost).
+Slides are *lazy*: loading a deck reads only metadata (and the PDF text layer); the pixels of a slide are
+rendered on first access through `SlideInput.image` and dropped again with `release()`, so a 100-page PDF
+does not sit in memory all at once.
+
+Detects which slides are really "flattened" (one picture covering the slide and no real text) so
+already-editable slides pass through untouched, keeps notes and the original geometry, and reads the PDF
+text layer when there is one (no OCR, no API cost).
 """
 from __future__ import annotations
 
 import io
 import os
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 from PIL import Image
 
@@ -24,14 +28,38 @@ DEFAULT_WIDTH_EMU = 12192000  # 16:9, 13.333 in
 class SlideInput:
     index: int                                   # 1-based position in the deck
     kind: str                                    # flat | passthrough | text_layer
-    image: Optional[Image.Image] = None          # rendered / embedded image (RGB)
     notes: str = ""
     rect_emu: Optional[Tuple[int, int, int, int]] = None   # where the picture sits (left, top, width, height)
     lines: Optional[List[Line]] = None           # PDF text layer lines (pixels of `image`)
-    clean_image: Optional[Image.Image] = None    # PDF rendered without text (pixel-perfect background)
-    embedded_images: List[dict] = field(default_factory=list)  # PDF: {"box": (x0,y0,x1,y1), "image": PIL}
-    pic_shape_id: Optional[int] = None           # PPTX: shape id of the flattened picture (to remove)
+    pic_shape_id: Optional[int] = None           # PPTX: shape id of the flattened picture
     reason: str = ""
+    loader: Optional[Callable[[], dict]] = field(default=None, repr=False, compare=False)
+    _data: Optional[dict] = field(default=None, repr=False, compare=False)
+
+    @classmethod
+    def from_image(cls, index: int, kind: str, image: Image.Image, **kw) -> "SlideInput":
+        return cls(index, kind, loader=lambda: {"image": image}, **kw)
+
+    def _load(self) -> dict:
+        if self._data is None:
+            self._data = self.loader() if self.loader else {}
+        return self._data
+
+    @property
+    def image(self) -> Optional[Image.Image]:
+        return self._load().get("image")
+
+    @property
+    def clean_image(self) -> Optional[Image.Image]:
+        """PDF text-layer pages: the page rendered without text (and without extracted images)."""
+        return self._load().get("clean_image")
+
+    @property
+    def embedded_images(self) -> List[dict]:
+        return self._load().get("embedded_images", [])
+
+    def release(self) -> None:
+        self._data = None
 
 
 @dataclass
@@ -58,13 +86,15 @@ def _slide_has_real_text(slide) -> bool:
     return False
 
 
-def _crop_pic(pic) -> Image.Image:
-    img = Image.open(io.BytesIO(pic.image.blob)).convert("RGB")
-    cl, cr, ct, cb = pic.crop_left or 0, pic.crop_right or 0, pic.crop_top or 0, pic.crop_bottom or 0
-    if any(abs(c) > 1e-4 for c in (cl, cr, ct, cb)):
-        w, h = img.size
-        img = img.crop((int(w * cl), int(h * ct), int(w * (1 - cr)), int(h * (1 - cb))))
-    return img
+def _pptx_loader(blob: bytes, crop: Tuple[float, float, float, float]) -> Callable[[], dict]:
+    def load():
+        img = Image.open(io.BytesIO(blob)).convert("RGB")
+        cl, cr, ct, cb = crop
+        if any(abs(c) > 1e-4 for c in crop):
+            w, h = img.size
+            img = img.crop((int(w * cl), int(h * ct), int(w * (1 - cr)), int(h * (1 - cb))))
+        return {"image": img}
+    return load
 
 
 def load_pptx(path: str, flat_cover: float = 0.85) -> Deck:
@@ -85,13 +115,14 @@ def load_pptx(path: str, flat_cover: float = 0.85) -> Deck:
                                      reason=f"picture covers {cover:.0%}" if cover < flat_cover else "has real text"))
             continue
         try:
-            img = _crop_pic(big)
-        except Exception as e:  # unreadable blob (emf/wmf etc.)
+            blob = big.image.blob
+            Image.open(io.BytesIO(blob)).verify()       # readable raster? (emf/wmf are not)
+        except Exception as e:
             slides.append(SlideInput(idx, "passthrough", notes=notes, reason=f"unreadable picture: {e}"))
             continue
-        slides.append(SlideInput(idx, "flat", image=img, notes=notes,
-                                 rect_emu=(big.left or 0, big.top or 0, big.width, big.height),
-                                 pic_shape_id=big.shape_id))
+        crop = (big.crop_left or 0, big.crop_right or 0, big.crop_top or 0, big.crop_bottom or 0)
+        slides.append(SlideInput(idx, "flat", notes=notes, rect_emu=(big.left or 0, big.top or 0, big.width, big.height),
+                                 pic_shape_id=big.shape_id, loader=_pptx_loader(blob, crop)))
     return Deck(path, "pptx", slides, sw, sh, source_prs=prs)
 
 
@@ -127,64 +158,100 @@ def _render(page, dpi: int) -> Image.Image:
     return Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
 
 
+def _pixmap_to_pil(doc, info) -> Optional[Image.Image]:
+    """Embedded image → PIL, honouring its soft mask (transparency) and colour space."""
+    import pymupdf
+    xref, smask = info[0], info[1]
+    pm = pymupdf.Pixmap(doc, xref)
+    if pm.n - pm.alpha != 3:                       # gray / CMYK / indexed → RGB
+        pm = pymupdf.Pixmap(pymupdf.csRGB, pm)
+    if smask:
+        try:
+            mask = pymupdf.Pixmap(doc, smask)
+            if mask.n - mask.alpha != 1:
+                mask = pymupdf.Pixmap(pymupdf.csGRAY, mask)
+            if (mask.width, mask.height) != (pm.width, pm.height):
+                mask = None
+            if mask is not None:
+                pm = pymupdf.Pixmap(pm, mask)
+        except Exception:
+            pass
+    mode = "RGBA" if pm.alpha else "RGB"
+    return Image.frombytes(mode, (pm.width, pm.height), pm.samples)
+
+
+def _pdf_loader(path: str, page_no: int, dpi: int, text_layer: bool, extract_images: bool) -> Callable[[], dict]:
+    def load():
+        import pymupdf
+        scale = dpi / 72.0
+        out = {}
+        doc = pymupdf.open(path)
+        try:
+            page = doc[page_no - 1]
+            out["image"] = _render(page, dpi)
+            if not text_layer:
+                return out
+            embedded: List[dict] = []
+            if extract_images:
+                for info in page.get_images(full=True):
+                    xref = info[0]
+                    try:
+                        rects = page.get_image_rects(xref)
+                    except Exception:
+                        rects = []
+                    keep = []
+                    for r in rects:
+                        area = (r.width * r.height) / (page.rect.width * page.rect.height)
+                        if 0.004 <= area <= 0.9:
+                            keep.append(r)
+                    if not keep:
+                        continue                   # full-page backgrounds and specks stay in the background
+                    try:
+                        pil = _pixmap_to_pil(doc, info)
+                    except Exception:
+                        continue
+                    for r in keep:
+                        box = (int(r.x0 * scale), int(r.y0 * scale), int(r.x1 * scale), int(r.y1 * scale))
+                        embedded.append({"box": box, "image": pil, "name": f"image {len(embedded) + 1}"})
+                    try:
+                        page.delete_image(xref)    # removes just this image; other images (backgrounds) survive
+                    except Exception:
+                        embedded = [e for e in embedded if e["image"] is not pil]
+            for blk in page.get_text("dict").get("blocks", []):
+                if blk.get("type", 0) == 0:
+                    page.add_redact_annot(pymupdf.Rect(blk["bbox"]))
+            page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE, graphics=pymupdf.PDF_REDACT_LINE_ART_NONE)
+            out["clean_image"] = _render(page, dpi)
+            out["embedded_images"] = embedded
+        except Exception:
+            out.pop("clean_image", None)
+            out["embedded_images"] = []
+        finally:
+            doc.close()
+        return out
+    return load
+
+
 def load_pdf(path: str, dpi: int = 150, extract_images: bool = True, min_text_chars: int = 8) -> Deck:
     import pymupdf
     doc = pymupdf.open(path)
-    slides: List[SlideInput] = []
-    width_emu = height_emu = None
-    for idx, page in enumerate(doc, 1):
+    try:
+        slides: List[SlideInput] = []
         scale = dpi / 72.0
-        img = _render(page, dpi)
-        if width_emu is None:
-            width_emu = DEFAULT_WIDTH_EMU
-            height_emu = int(DEFAULT_WIDTH_EMU * page.rect.height / page.rect.width)
-        lines = _pdf_lines(page, scale)
-        n_chars = sum(len(l.text) for l in lines)
-        if n_chars < min_text_chars:
-            slides.append(SlideInput(idx, "flat", image=img))
-            continue
-        # text layer present: render the page again with text (and optionally images) removed
-        clean, embedded = None, []
-        try:
-            tmp = pymupdf.open(path)
-            p2 = tmp[idx - 1]
-            for blk in p2.get_text("dict").get("blocks", []):
-                if blk.get("type", 0) == 0:
-                    p2.add_redact_annot(pymupdf.Rect(blk["bbox"]))
-            img_mode = pymupdf.PDF_REDACT_IMAGE_NONE
-            if extract_images:
-                for info in p2.get_images(full=True):
-                    xref = info[0]
-                    try:
-                        rects = p2.get_image_rects(xref)
-                    except Exception:
-                        rects = []
-                    for r in rects:
-                        area = (r.width * r.height) / (p2.rect.width * p2.rect.height)
-                        if area < 0.004 or area > 0.9:
-                            continue
-                        try:
-                            pm = pymupdf.Pixmap(tmp, xref)
-                            if pm.n - pm.alpha >= 4:
-                                pm = pymupdf.Pixmap(pymupdf.csRGB, pm)
-                            mode = "RGBA" if pm.alpha else "RGB"
-                            pil = Image.frombytes(mode, (pm.width, pm.height), pm.samples)
-                        except Exception:
-                            continue
-                        box = (int(r.x0 * scale), int(r.y0 * scale), int(r.x1 * scale), int(r.y1 * scale))
-                        embedded.append({"box": box, "image": pil, "name": f"image {len(embedded) + 1}"})
-                        p2.add_redact_annot(r)
-                if embedded:
-                    img_mode = pymupdf.PDF_REDACT_IMAGE_REMOVE
-            p2.apply_redactions(images=img_mode, graphics=pymupdf.PDF_REDACT_LINE_ART_NONE)
-            clean = _render(p2, dpi)
-            tmp.close()
-        except Exception:
-            clean, embedded = None, []
-        slides.append(SlideInput(idx, "text_layer", image=img, lines=lines, clean_image=clean,
-                                 embedded_images=embedded))
-    doc.close()
-    return Deck(path, "pdf", slides, width_emu or DEFAULT_WIDTH_EMU, height_emu or int(DEFAULT_WIDTH_EMU * 9 / 16))
+        first = doc[0].rect if doc.page_count else None
+        width_emu = DEFAULT_WIDTH_EMU
+        height_emu = int(DEFAULT_WIDTH_EMU * first.height / first.width) if first else int(DEFAULT_WIDTH_EMU * 9 / 16)
+        for idx, page in enumerate(doc, 1):
+            lines = _pdf_lines(page, scale)
+            n_chars = sum(len(l.text) for l in lines)
+            if n_chars < min_text_chars:
+                slides.append(SlideInput(idx, "flat", loader=_pdf_loader(path, idx, dpi, False, extract_images)))
+            else:
+                slides.append(SlideInput(idx, "text_layer", lines=lines,
+                                         loader=_pdf_loader(path, idx, dpi, True, extract_images)))
+    finally:
+        doc.close()
+    return Deck(path, "pdf", slides, width_emu, height_emu)
 
 
 # ───────────────────────── images ─────────────────────────
@@ -195,10 +262,11 @@ def load_images(paths: List[str]) -> Deck:
     slides = []
     w_emu = h_emu = None
     for idx, p in enumerate(paths, 1):
-        img = Image.open(p).convert("RGB")
+        with Image.open(p) as im:
+            w, h = im.size
         if w_emu is None:
-            w_emu, h_emu = DEFAULT_WIDTH_EMU, int(DEFAULT_WIDTH_EMU * img.height / img.width)
-        slides.append(SlideInput(idx, "flat", image=img))
+            w_emu, h_emu = DEFAULT_WIDTH_EMU, int(DEFAULT_WIDTH_EMU * h / w)
+        slides.append(SlideInput(idx, "flat", loader=(lambda q=p: {"image": Image.open(q).convert("RGB")})))
     return Deck(paths[0], "image", slides, w_emu, h_emu)
 
 
