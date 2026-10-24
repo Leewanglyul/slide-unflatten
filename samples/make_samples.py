@@ -11,8 +11,10 @@ sys.path.insert(0, os.path.dirname(HERE))
 
 from PIL import Image, ImageDraw, ImageFont  # noqa: E402
 
-FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-FONT_B = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+_FONT_PAIRS = [("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+               ("C:/Windows/Fonts/arial.ttf", "C:/Windows/Fonts/arialbd.ttf"),
+               ("/System/Library/Fonts/Supplemental/Arial.ttf", "/System/Library/Fonts/Supplemental/Arial Bold.ttf")]
+FONT, FONT_B = next((r, b) for r, b in _FONT_PAIRS if os.path.exists(r) and os.path.exists(b))
 
 
 def draw_slide(w=1280, h=720):
