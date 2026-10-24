@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.unflatten-cache/
+samples/out/
+*_editable.pptx
+*_report.html
+*_manifest.json
+*_bundle.zip
