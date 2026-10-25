@@ -36,23 +36,22 @@ def ink_box(arr: np.ndarray, box):
 
 
 def text_color(arr: np.ndarray, box) -> Tuple[int, int, int]:
-    """Dominant stroke colour inside a text box (2-means; the cluster farther from the surrounding
-    background is the text). Choosing the smaller cluster fails on large bold titles, where a tight
-    ink box holds more stroke pixels than background pixels."""
+    """Dominant stroke colour inside a text box (2-means; the cluster farther from the box's own
+    border colour is the text). Choosing the smaller cluster fails on large bold titles, where a
+    tight ink box holds more stroke pixels than background pixels. The box's own border is used as
+    the background reference (not a ring outside it): glyphs only touch the border at a few points,
+    while a ring outside can spill past the edge of a coloured container the text sits in."""
     x0, y0, x1, y1 = box
-    patch = arr[y0:y1, x0:x1].reshape(-1, 3).astype(np.float32)
+    region = arr[y0:y1, x0:x1]
+    patch = region.reshape(-1, 3).astype(np.float32)
     if len(patch) < 10:
         return (0, 0, 0)
     _, labels, centers = cv2.kmeans(patch, 2, None,
                                     (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0),
                                     3, cv2.KMEANS_PP_CENTERS)
-    h, w = arr.shape[:2]
-    pad = max(3, (y1 - y0) // 4)
-    ox0, oy0, ox1, oy1 = max(x0 - pad, 0), max(y0 - pad, 0), min(x1 + pad, w), min(y1 + pad, h)
-    outer = arr[oy0:oy1, ox0:ox1]
-    if outer.shape[0] > 2 and outer.shape[1] > 2 and (ox0, oy0, ox1, oy1) != (x0, y0, x1, y1):
-        ring = np.concatenate([outer[0], outer[-1], outer[:, 0], outer[:, -1]]).astype(np.float32)
-        bg = np.median(ring, axis=0)
+    if region.shape[0] > 2 and region.shape[1] > 2:
+        border = np.concatenate([region[0], region[-1], region[:, 0], region[:, -1]]).astype(np.float32)
+        bg = np.median(border, axis=0)
         fg = int(np.argmax(np.linalg.norm(centers - bg, axis=1)))
     else:
         fg = int(np.argmin(np.bincount(labels.flatten(), minlength=2)))

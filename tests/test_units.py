@@ -47,15 +47,36 @@ def test_group_text_layer_merges_paragraph():
     assert blocks[1].text == "c" and blocks[1].bullet
 
 
+
+def _blobs(arr, y0, y1, x0, x1, r, color, step=1.2):
+    """Round 'glyph' blobs in a row; step < 2 overlaps them (dense bold text), larger spaces them out."""
+    import cv2
+    cy = (y0 + y1) // 2
+    for cx in range(x0 + r, x1 - r + 1, int(r * step)):
+        cv2.circle(arr, (cx, cy), r, color, -1)
+
+
 def test_text_color_bold_title_on_light_background():
     """A tight ink box around heavy bold text holds more stroke than background pixels;
     the text colour must still be the stroke colour, not the background."""
     import numpy as np
     from unflatten.imageops import ink_box, text_color
-    arr = np.full((120, 400, 3), 250, np.uint8)            # near-white slide
-    arr[40:80, 50:350] = (40, 60, 120)                      # dark navy "bold strokes"
-    arr[40:80, 120:126] = 250                               # a few thin gaps between letters
-    arr[40:80, 230:236] = 250
-    box = ink_box(arr, (45, 35, 355, 85))
+    arr = np.full((140, 420, 3), 250, np.uint8)             # near-white slide
+    _blobs(arr, 40, 100, 40, 380, 30, (40, 60, 120))         # dark navy bold "letters"
+    box = ink_box(arr, (30, 30, 390, 110))
     r, g, b = text_color(arr, box)
-    assert (r, g, b) != (250, 250, 250) and r < 100 and b > g
+    assert r < 100 and b > g, (r, g, b)
+
+
+def test_text_color_light_text_in_corner_of_coloured_box():
+    """White text tucked into the top-left corner of a blue box on a white page must stay white.
+    A ring sampled outside the text box spills onto the page and makes the blue look like text
+    (seen on a real quote box, where the first line came out blue on blue)."""
+    import numpy as np
+    from unflatten.imageops import ink_box, text_color
+    arr = np.full((200, 420, 3), 255, np.uint8)                # white page
+    arr[60:180, 60:400] = (70, 150, 230)                        # blue quote box
+    _blobs(arr, 62, 92, 63, 200, 13, (250, 250, 250), step=3)   # sparse white text in the box's top-left corner
+    box = ink_box(arr, (60, 60, 205, 94))
+    r, g, b = text_color(arr, box)
+    assert min(r, g, b) > 200, (r, g, b)
