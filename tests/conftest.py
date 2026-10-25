@@ -10,6 +10,9 @@ _FONT_PAIRS = [("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/f
                ("C:/Windows/Fonts/arial.ttf", "C:/Windows/Fonts/arialbd.ttf"),
                ("/System/Library/Fonts/Supplemental/Arial.ttf", "/System/Library/Fonts/Supplemental/Arial Bold.ttf")]
 FONT, FONT_B = next((r, b) for r, b in _FONT_PAIRS if os.path.exists(r) and os.path.exists(b))
+_MONO_FONTS = ["/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", "C:/Windows/Fonts/consola.ttf",
+               "/System/Library/Fonts/Supplemental/Courier New.ttf"]
+FONT_MONO = next(f for f in _MONO_FONTS if os.path.exists(f))
 
 
 def draw_slide(w=1280, h=720):

@@ -8,7 +8,7 @@ from unflatten.builder import iter_shapes
 from unflatten.config import Config
 from unflatten.inputs import load_deck
 from unflatten.pipeline import convert, estimate, rebuild, bundle_zip
-from tests.conftest import FakeOCR, FONT, FONT_B
+from tests.conftest import FakeOCR, FONT, FONT_B, FONT_MONO
 
 NS = {"a": "http://schemas.openxmlformats.org/drawingml/2006/main", "p": "http://schemas.openxmlformats.org/presentationml/2006/main"}
 
@@ -158,7 +158,7 @@ def test_rebuild_refits_font_sizes(flat_png, tmp_path):
     """Rebuilding with a wider font must re-fit sizes so text stays inside its box."""
     import re
     path, lines = flat_png
-    mono = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
+    mono = FONT_MONO
     cfg = Config(mode="text", language="en", use_claude=False, out_dir=str(tmp_path / "out"), font_regular_file=FONT, font_bold_file=FONT_B)
     res = convert(path, cfg, ocr_override=FakeOCR(lines), log=lambda *a: None)
     sizes1 = [int(v) for v in re.findall(r'<a:rPr[^>]*\bsz="(\d+)"', _xml(Presentation(res.out_path).slides[0]))]
