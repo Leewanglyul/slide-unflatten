@@ -34,7 +34,7 @@ def test_config_roundtrip_and_cost():
     assert "api_key" not in d
     c2 = Config.from_dict(d)
     assert c2.mode == "text" and c2.language == "en" and not c2.split_objects
-    assert estimate_cost_usd(10, "claude-haiku-5-5") < estimate_cost_usd(10, "claude-opus-5-5")
+    assert estimate_cost_usd(10, "claude-sonnet-5-5") < estimate_cost_usd(10, "claude-opus-5-5")
 
 
 def test_group_text_layer_merges_paragraph():
@@ -45,3 +45,17 @@ def test_group_text_layer_merges_paragraph():
     assert len(blocks) == 2
     assert blocks[0].text == "a\nb" and blocks[0].role == "title"
     assert blocks[1].text == "c" and blocks[1].bullet
+
+
+def test_text_color_bold_title_on_light_background():
+    """A tight ink box around heavy bold text holds more stroke than background pixels;
+    the text colour must still be the stroke colour, not the background."""
+    import numpy as np
+    from unflatten.imageops import ink_box, text_color
+    arr = np.full((120, 400, 3), 250, np.uint8)            # near-white slide
+    arr[40:80, 50:350] = (40, 60, 120)                      # dark navy "bold strokes"
+    arr[40:80, 120:126] = 250                               # a few thin gaps between letters
+    arr[40:80, 230:236] = 250
+    box = ink_box(arr, (45, 35, 355, 85))
+    r, g, b = text_color(arr, box)
+    assert (r, g, b) != (250, 250, 250) and r < 100 and b > g

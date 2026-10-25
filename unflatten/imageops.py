@@ -36,7 +36,9 @@ def ink_box(arr: np.ndarray, box):
 
 
 def text_color(arr: np.ndarray, box) -> Tuple[int, int, int]:
-    """Dominant stroke colour inside a text box (2-means; the smaller cluster is the text)."""
+    """Dominant stroke colour inside a text box (2-means; the cluster farther from the surrounding
+    background is the text). Choosing the smaller cluster fails on large bold titles, where a tight
+    ink box holds more stroke pixels than background pixels."""
     x0, y0, x1, y1 = box
     patch = arr[y0:y1, x0:x1].reshape(-1, 3).astype(np.float32)
     if len(patch) < 10:
@@ -44,8 +46,16 @@ def text_color(arr: np.ndarray, box) -> Tuple[int, int, int]:
     _, labels, centers = cv2.kmeans(patch, 2, None,
                                     (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0),
                                     3, cv2.KMEANS_PP_CENTERS)
-    counts = np.bincount(labels.flatten(), minlength=2)
-    fg = int(np.argmin(counts))
+    h, w = arr.shape[:2]
+    pad = max(3, (y1 - y0) // 4)
+    ox0, oy0, ox1, oy1 = max(x0 - pad, 0), max(y0 - pad, 0), min(x1 + pad, w), min(y1 + pad, h)
+    outer = arr[oy0:oy1, ox0:ox1]
+    if outer.shape[0] > 2 and outer.shape[1] > 2 and (ox0, oy0, ox1, oy1) != (x0, y0, x1, y1):
+        ring = np.concatenate([outer[0], outer[-1], outer[:, 0], outer[:, -1]]).astype(np.float32)
+        bg = np.median(ring, axis=0)
+        fg = int(np.argmax(np.linalg.norm(centers - bg, axis=1)))
+    else:
+        fg = int(np.argmin(np.bincount(labels.flatten(), minlength=2)))
     return tuple(int(c) for c in centers[fg])
 
 
