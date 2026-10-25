@@ -9,7 +9,6 @@ from typing import List, Optional
 MODELS = {
     "claude-opus-5-5":   {"label": "Opus 5.5 (권장 · 가장 정확)", "in": 4.00, "out": 20.00},
     "claude-sonnet-5-5": {"label": "Sonnet 5.5 (절반 가격)",      "in": 2.00, "out": 10.00},
-    "claude-haiku-5-5":  {"label": "Haiku 5.5 (텍스트 교정만 권장)", "in": 0.10, "out": 0.50},
 }
 DEFAULT_MODEL = "claude-opus-5-5"
 # rough per-slide token budget used for the estimate (image ≈ 1.6k + prompt + line listing / structured answer)

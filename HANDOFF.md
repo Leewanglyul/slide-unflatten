@@ -127,4 +127,4 @@ pytest -q
 ## 10. 참고
 
 - 원본 노트북(출발점): `slide_unflatten_1.ipynb` (Gemini Notebook·NotebookLM 슬라이드용 단일 노트북).
-- Claude 모델·가격(2026-10 기준): Opus 5.5 $4/$20, Sonnet 5.5 $2/$10, Haiku 5.5 $0.10/$0.50 (백만 토큰당 입력/출력). 장당 대략 Opus $0.045.
+- Claude 모델·가격(2026-10 기준): Opus 5.5 $4/$20, Sonnet 5.5 $2/$10 (백만 토큰당 입력/출력). Haiku는 `effort` 설정을 지원하지 않아 목록에서 뺐다. 장당 대략 Opus $0.045.
