@@ -94,6 +94,8 @@ class Config:
     mask_pad: int = 4
     min_object_area: float = 0.004
     max_object_area: float = 0.45
+    edge_expand: int = 4                    # px a picture's cut-out may grow to take in its outline / sticker rim
+    edge_feather: float = 1.0               # px of anti-aliased (soft) edge on picture cut-outs; 0 = hard edge
     # infra
     cache_dir: Optional[str] = None         # None -> <out_dir>/.unflatten-cache
     out_dir: Optional[str] = None
@@ -141,6 +143,12 @@ class Config:
         """Config parts that change recognition results (not assembly). Which OCR/Claude backend actually ran
         is added by the pipeline (resolved at run time), so degraded runs never masquerade as full ones."""
         return {"mode": self.mode, "language": self.language, "dpi": self.pdf_dpi, "watermark": self.remove_watermark}
+
+    def split_params(self) -> dict:
+        """Parts that change only the erase/split step. Cached recognition (OCR, Claude) is reused when
+        these change; just the cut-outs and the background are redone."""
+        return {"edge_expand": self.edge_expand, "edge_feather": self.edge_feather, "mask_pad": self.mask_pad,
+                "min_object_area": self.min_object_area, "max_object_area": self.max_object_area}
 
     def to_dict(self) -> dict:
         d = asdict(self)

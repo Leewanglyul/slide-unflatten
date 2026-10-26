@@ -194,3 +194,22 @@ def test_cache_key_reflects_backends(flat_png):
     k_other_model = SlideCache.key(img, cfg, "easyocr", True, "claude-sonnet-5-5")
     assert len({k_none, k_claude, k_other_model}) == 3
     assert SlideCache.key(img, cfg, "easyocr", False, "claude-opus-5-5") == k_none   # model irrelevant without Claude
+
+
+def test_rebuild_with_new_edge_settings_resplits_without_recognition(flat_png, tmp_path):
+    """Changing only edge settings reuses cached OCR/Claude but redoes the cut-outs."""
+    import numpy as np
+    from unflatten.cache import SlideCache
+    path, lines = flat_png
+    cfg = Config(mode="objects", language="en", use_claude=False, out_dir=str(tmp_path / "out"), edge_feather=0)
+    ocr = FakeOCR(lines)
+    res = convert(path, cfg, ocr_override=ocr, log=lambda *a: None)
+    cache = SlideCache(os.path.join(str(tmp_path / "out"), ".unflatten-cache"))
+    key = res.summaries[0].cache_key
+    _, _, hard = cache.load(key)
+    assert all(set(np.unique(p.rgba[..., 3])) <= {0, 255} for p in hard)
+    res2 = rebuild(res.manifest_path, {"edge_feather": 1.5}, log=lambda *a: None)
+    assert ocr.calls == 1                                           # recognition not repeated
+    _, _, soft = cache.load(res2.summaries[0].cache_key)
+    assert any(len(set(np.unique(p.rgba[..., 3]))) > 2 for p in soft)   # soft edges now
+    assert cache.split_params(key)["edge_feather"] == 1.5

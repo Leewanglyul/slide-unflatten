@@ -34,7 +34,8 @@ class SlideCache:
     def has(self, key: str) -> bool:
         return os.path.exists(os.path.join(self._dir(key), "analysis.json"))
 
-    def save(self, key: str, analysis: SlideAnalysis, background: Image.Image, pieces: List[Piece]):
+    def save(self, key: str, analysis: SlideAnalysis, background: Image.Image, pieces: List[Piece],
+             split_params: dict = None):
         d = self._dir(key)
         os.makedirs(os.path.join(d, "pieces"), exist_ok=True)
         background.save(os.path.join(d, "background.png"))
@@ -48,7 +49,13 @@ class SlideCache:
             q = Piece(p.x, p.y, p.w, p.h, p.name, png_path=path)
             plist.append(q.to_dict())
         with open(os.path.join(d, "analysis.json"), "w", encoding="utf-8") as f:
-            json.dump({"analysis": analysis.to_dict(), "pieces": plist}, f, ensure_ascii=False, indent=1)
+            json.dump({"analysis": analysis.to_dict(), "pieces": plist, "split_params": split_params or {}},
+                      f, ensure_ascii=False, indent=1)
+
+    def split_params(self, key: str) -> dict:
+        """Settings the stored background/pieces were cut with ({} for entries written before this existed)."""
+        with open(os.path.join(self._dir(key), "analysis.json"), encoding="utf-8") as f:
+            return json.load(f).get("split_params") or {}
 
     def load_analysis(self, key: str) -> SlideAnalysis:
         with open(os.path.join(self._dir(key), "analysis.json"), encoding="utf-8") as f:

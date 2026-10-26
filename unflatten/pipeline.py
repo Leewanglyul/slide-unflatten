@@ -194,7 +194,14 @@ def convert(path: str, cfg: Optional[Config] = None, out_path: Optional[str] = N
             if item.get("cached") or item.get("dup"):
                 if not cache.has(key):
                     raise RuntimeError("duplicate of a slide that failed")
-                analysis, background, pieces = cache.load(key)
+                if cache.split_params(key) != cfg.split_params():
+                    # only edge/cut settings changed: reuse OCR + Claude, redo erase and split
+                    analysis = cache.load_analysis(key)
+                    log("  " + t(lang, "resplit"))
+                    background, pieces = _erase_and_split(si, analysis, cfg, log)
+                    cache.save(key, analysis, background, pieces, cfg.split_params())
+                else:
+                    analysis, background, pieces = cache.load(key)
                 save_key = key
             else:
                 analysis: SlideAnalysis = item["analysis"]
@@ -226,7 +233,7 @@ def convert(path: str, cfg: Optional[Config] = None, out_path: Optional[str] = N
                 # a slide that fell back to heuristics is cached under the heuristic key, never the Claude key
                 degraded = si.kind == "flat" and service is not None and not analysis.used_claude
                 save_key = SlideCache.key(si.image, cfg, backend_name, False) if degraded else key
-                cache.save(save_key, analysis, background, pieces)
+                cache.save(save_key, analysis, background, pieces, cfg.split_params())
             summ.cache_key = save_key
             summ.status = "text_layer" if si.kind == "text_layer" else "ok"
             summ.n_lines, summ.n_blocks, summ.n_pieces = len(analysis.lines), len(analysis.blocks), len(pieces)

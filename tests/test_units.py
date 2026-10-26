@@ -80,3 +80,56 @@ def test_text_color_light_text_in_corner_of_coloured_box():
     box = ink_box(arr, (60, 60, 205, 94))
     r, g, b = text_color(arr, box)
     assert min(r, g, b) > 200, (r, g, b)
+
+
+def _sticker_scene():
+    """Pink card, a white sticker rim around a blue figure, and a soft grey drop shadow below it."""
+    import cv2
+    import numpy as np
+    arr = np.full((240, 320, 3), (250, 214, 214), np.uint8)       # pink card
+    cv2.circle(arr, (160, 128), 60, (226, 196, 198), -1)           # soft shadow (darker, same hue)
+    cv2.circle(arr, (160, 120), 56, (255, 255, 255), -1)           # white sticker rim
+    cv2.circle(arr, (160, 120), 48, (90, 140, 220), -1)            # the figure
+    figure = np.zeros(arr.shape[:2], bool)
+    cv2.circle(figure.view(np.uint8), (160, 120), 48, 1, -1)
+    rim = np.zeros(arr.shape[:2], np.uint8)
+    cv2.circle(rim, (160, 120), 55, 1, -1)
+    return arr, figure, rim.astype(bool)
+
+
+def test_refine_mask_takes_sticker_rim_and_drops_swallowed_card():
+    """SAM-like mask = figure only + a strip of card next to it. Refining must add the white rim
+    (judged against the pink card, not the slide border) and drop the swallowed card strip."""
+    import cv2
+    import numpy as np
+    from unflatten.segment import refine_mask
+    arr, figure, rim = _sticker_scene()
+    lab = cv2.cvtColor(arr, cv2.COLOR_RGB2LAB).astype(np.int16)
+    m = figure.copy()
+    m[100:140, 210:260] = True                                     # card showing beside the figure, swallowed
+    out = refine_mask(lab, m, expand=8)
+    assert out[120, 108] and out[120, 212]                          # white rim on both sides now included
+    assert not out[110:130, 240:260].any()                          # swallowed pink strip gone
+    assert out[figure].all()                                        # figure itself untouched
+
+
+def test_background_mask_clears_soft_shadow():
+    """Erasing the cut-out from the background must also take the soft drop shadow (no grey halo)."""
+    import cv2
+    import numpy as np
+    from unflatten.segment import background_mask
+    arr, figure, rim = _sticker_scene()
+    lab = cv2.cvtColor(arr, cv2.COLOR_RGB2LAB).astype(np.int16)
+    mask = background_mask(lab, rim, expand=4) > 0
+    assert mask[186, 160]                                           # shadow below the sticker (y = 128 + 58)
+    assert not mask[10, 10]                                         # plain card far away untouched
+
+
+def test_soft_alpha_rim():
+    import numpy as np
+    from unflatten.segment import soft_alpha
+    m = np.zeros((40, 40), bool)
+    m[10:30, 10:30] = True
+    hard, soft = soft_alpha(m, 0), soft_alpha(m, 1.0)
+    assert set(np.unique(hard)) <= {0, 255}
+    assert soft[20, 20] == 255 and 0 < soft[20, 9] < 255           # opaque core, anti-aliased rim

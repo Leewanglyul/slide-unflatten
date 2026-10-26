@@ -21,6 +21,10 @@ def _add_common(p: argparse.ArgumentParser):
     p.add_argument("--out", help="output directory")
     p.add_argument("--cache", help="cache directory")
     p.add_argument("--upscale", type=int, default=1)
+    p.add_argument("--edge-expand", type=int, default=4,
+                   help="px a picture cut-out may grow to take in its outline/sticker rim (0 = off)")
+    p.add_argument("--edge-feather", type=float, default=1.0,
+                   help="px of soft (anti-aliased) edge on picture cut-outs (0 = hard edge)")
     p.add_argument("--no-hidden-original", action="store_true")
     p.add_argument("--no-groups", action="store_true")
     p.add_argument("--no-theme-fonts", action="store_true")
@@ -35,7 +39,8 @@ def cfg_from_args(a) -> Config:
                   slide_range=a.slides, out_dir=a.out, cache_dir=a.cache, upscale=a.upscale,
                   keep_hidden_original=not a.no_hidden_original, group_shapes=not a.no_groups,
                   use_theme_fonts=not a.no_theme_fonts, remove_watermark=not a.no_watermark_removal,
-                  make_report=not a.no_report, ui_lang=a.ui_lang)
+                  make_report=not a.no_report, ui_lang=a.ui_lang,
+                  edge_expand=a.edge_expand, edge_feather=a.edge_feather)
 
 
 def print_summary(res):
@@ -95,6 +100,7 @@ def main(argv=None):
     r.add_argument("--font"); r.add_argument("--font-bold"); r.add_argument("--font-name")
     r.add_argument("--no-groups", action="store_true"); r.add_argument("--no-theme-fonts", action="store_true")
     r.add_argument("--no-hidden-original", action="store_true"); r.add_argument("--upscale", type=int)
+    r.add_argument("--edge-expand", type=int); r.add_argument("--edge-feather", type=float)
 
     u = sub.add_parser("ui", help="launch the Gradio web UI")
     u.add_argument("--share", action="store_true")
@@ -126,6 +132,8 @@ def main(argv=None):
         if a.no_theme_fonts: ov["use_theme_fonts"] = False
         if a.no_hidden_original: ov["keep_hidden_original"] = False
         if a.upscale: ov["upscale"] = a.upscale
+        if a.edge_expand is not None: ov["edge_expand"] = a.edge_expand
+        if a.edge_feather is not None: ov["edge_feather"] = a.edge_feather
         res = rebuild(a.manifest, ov)
         print_summary(res); return 0
     if a.cmd == "convert":
