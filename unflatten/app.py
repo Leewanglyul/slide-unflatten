@@ -21,12 +21,12 @@ def _path(f) -> str:
 def _job_dir() -> str:
     return tempfile.mkdtemp(prefix="job_", dir=_SESSION_DIR)
 
-from .config import Config, LANGUAGE_PROFILES, MODELS, PRESETS
+from .config import Config, LANGUAGE_PROFILES, MODELS, OCR_CHOICES, PRESETS
 from .fonts import assign_font_files
 
 UI = {
     "ko": dict(title="🧩 이미지 슬라이드 → 편집 가능한 PPTX", sub="NotebookLM·Gemini·Canva·Gamma 등에서 받은 통이미지 슬라이드를 글자와 그림을 고칠 수 있는 PPTX로 바꿉니다.",
-               files="변환할 파일 (PPTX · PDF · PNG/JPG, 여러 개 가능)", mode="처리 방식", lang="슬라이드 언어", model="Claude 모델",
+               files="변환할 파일 (PPTX · PDF · PNG/JPG, 여러 개 가능)", mode="처리 범위", ocr="글자 인식 엔진 (OCR)", lang="슬라이드 언어", model="Claude 모델",
                use_claude="Claude 사용 (오타 교정·문단 묶기·개체 인식)", key="API 키 (비워 두면 환경 변수 ANTHROPIC_API_KEY)",
                fonts="글꼴 파일 (.ttf/.otf, 보통+굵게 두 개 권장, 선택)", slides="슬라이드 범위 (예: 1-3,7 · 비우면 전체)",
                adv="고급 설정", hidden="원본 이미지를 숨김 층으로 보관", groups="그림·텍스트를 그룹으로 묶기", theme="테마 글꼴 사용 (마스터에서 한 번에 바꾸기)",
@@ -36,7 +36,7 @@ UI = {
                rebuild="재조립", fix_tab="텍스트 수정", fix_help="표에서 인식된 텍스트를 고친 뒤 저장하면, 재조립 때 반영됩니다.",
                save_fix="수정 저장", no_files="파일을 올려 주세요.", est_fmt="{n}장 처리 예정 (PDF 텍스트 {t}장 · 유지 {p}장) · 예상 {m}분 · 예상 비용 약 ${usd:.2f} ({krw:,.0f}원)"),
     "en": dict(title="🧩 Image slides → editable PPTX", sub="Turn image-only slides from NotebookLM, Gemini, Canva or Gamma into PPTX with real text boxes and movable pictures.",
-               files="Files to convert (PPTX · PDF · PNG/JPG)", mode="Mode", lang="Slide language", model="Claude model",
+               files="Files to convert (PPTX · PDF · PNG/JPG)", mode="Mode", ocr="Text recognition (OCR)", lang="Slide language", model="Claude model",
                use_claude="Use Claude (text correction, grouping, object detection)", key="API key (blank = ANTHROPIC_API_KEY env)",
                fonts="Font files (.ttf/.otf, regular + bold recommended, optional)", slides="Slide range (e.g. 1-3,7; blank = all)",
                adv="Advanced", hidden="Keep original as hidden layer", groups="Group pictures / text", theme="Use theme fonts",
@@ -52,6 +52,7 @@ INFO = {
         mode="글자만: 글자만 편집 가능하게, 그림은 배경에 그대로(가장 빠름·저렴) · 글자+그림: 그림을 덩어리 단위로 떼어 냄 · "
              "세부 개체: 그림 속 사람·물건까지 따로 떼어 내고, 겹쳐 가려진 부분은 AI가 채움",
         lang="슬라이드에 쓰인 언어. 글자 인식과 기본 글꼴을 정합니다.",
+        ocr="모두 무료. EasyOCR은 꾸민 제목 글씨에, PaddleOCR은 본문 한글에 더 정확한 경우가 많습니다. 설치되지 않은 엔진을 고르면 다른 엔진으로 대신합니다.",
         model="Opus: 가장 정확(장당 약 50~80원) · Sonnet: 비용 절반. Claude 사용을 켰을 때만 씁니다.",
         use_claude="끄면 비용 없이 규칙 기반으로만 처리합니다. 오타가 남고, 꾸민 글씨·기울어진 글씨는 이미지로 남을 수 있습니다.",
         fonts="보통 굵기 + 굵은 것 두 개를 함께 올리면 본문·제목에 자동 배정되고, 글자 크기도 이 글꼴 폭에 맞춥니다.",
@@ -68,6 +69,7 @@ INFO = {
         mode="Text only: editable text, pictures stay in the background (fastest, cheapest) · Text + pictures: pictures as whole "
              "pieces · Detailed objects: people and things inside a picture separately, hidden parts filled in by AI",
         lang="Language written on the slides; sets text recognition and default fonts.",
+        ocr="All free. EasyOCR tends to do better on decorated titles, PaddleOCR on Korean body text. An engine that is not installed falls back to another.",
         model="Opus: most accurate · Sonnet: half the cost. Used only when Claude is on.",
         use_claude="Off = rule-based only, no API cost. Typos stay; decorated or tilted text may stay in the image.",
         fonts="Upload a regular and a bold file together: they go to body and titles, and sizes fit that font's width.",
@@ -84,13 +86,14 @@ INFO = {
 }
 
 
-def _cfg(mode_label, lang_label, model_label, use_claude, key, font_files, slides, hidden, groups, theme, wm, wrap,
+def _cfg(mode_label, ocr_label, lang_label, model_label, use_claude, key, font_files, slides, hidden, groups, theme, wm, wrap,
          edge_expand, edge_feather, ui_lang) -> Config:
     mode = next((k for k, v in PRESETS.items() if v[f"label_{ui_lang}"] == mode_label), "full")
     lang = next((k for k, v in LANGUAGE_PROFILES.items() if v["label"] == lang_label), "ko")
+    ocr = next((k for k, v in OCR_CHOICES.items() if v[f"label_{ui_lang}"] == ocr_label), "auto")
     model = next((k for k, v in MODELS.items() if v["label"] == model_label), "claude-opus-5-5")
     reg, bold = assign_font_files([_path(f) for f in (font_files or [])])
-    return Config(mode=mode, language=lang, model=model, use_claude=bool(use_claude), api_key=(key or "").strip() or None,
+    return Config(mode=mode, ocr_backend=ocr, language=lang, model=model, use_claude=bool(use_claude), api_key=(key or "").strip() or None,
                   font_regular_file=reg, font_bold_file=bold, slide_range=(slides or "").strip() or None,
                   keep_hidden_original=hidden, group_shapes=groups, use_theme_fonts=theme, remove_watermark=wm,
                   body_word_wrap=wrap, edge_expand=int(edge_expand), edge_feather=float(edge_feather),
@@ -112,6 +115,8 @@ def build_demo(ui_lang: str = "ko"):
                     with gr.Column(scale=1):
                         files = gr.File(label=S["files"], file_count="multiple", file_types=[".pptx", ".pdf", ".png", ".jpg", ".jpeg", ".webp"])
                         mode = gr.Radio([v[f"label_{ui_lang}"] for v in PRESETS.values()], value=PRESETS["full"][f"label_{ui_lang}"], label=S["mode"], info=I["mode"])
+                        ocr = gr.Dropdown([v[f"label_{ui_lang}"] for v in OCR_CHOICES.values()],
+                                          value=OCR_CHOICES["auto"][f"label_{ui_lang}"], label=S["ocr"], info=I["ocr"])
                         lang = gr.Dropdown([v["label"] for v in LANGUAGE_PROFILES.values()], value=LANGUAGE_PROFILES["ko"]["label"], label=S["lang"], info=I["lang"])
                         use_claude = gr.Checkbox(True, label=S["use_claude"], info=I["use_claude"])
                         model = gr.Dropdown([v["label"] for v in MODELS.values()], value=MODELS["claude-opus-5-5"]["label"], label=S["model"], info=I["model"])
@@ -136,7 +141,7 @@ def build_demo(ui_lang: str = "ko"):
                         table = gr.Dataframe(label=S["table"], interactive=False, wrap=True)
                         downloads = gr.File(label=S["download"], file_count="multiple")
 
-                inputs = [files, mode, lang, model, use_claude, key, fonts, slides, hidden, groups, theme, wm, wrap, edge_expand, edge_feather]
+                inputs = [files, mode, ocr, lang, model, use_claude, key, fonts, slides, hidden, groups, theme, wm, wrap, edge_expand, edge_feather]
 
                 def do_estimate(files, *opts):
                     if not files:
