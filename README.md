@@ -9,7 +9,7 @@ Turn image-only slides into editable PPTX: real text boxes, movable picture piec
  │
  ├─ 입력 판별      통이미지 슬라이드만 변환, 이미 편집 가능한 슬라이드·노트·슬라이드 크기는 그대로 유지
  ├─ PDF 텍스트층   글자가 실제 텍스트인 PDF는 OCR·API 없이 좌표·크기·색을 그대로 복원
- ├─ 글자 인식      EasyOCR(위치) + Claude(오타 교정 · 문단 묶기 · 제목/본문 · 강조 · 글머리 · 워터마크 · 개체 찾기)
+ ├─ 글자 인식      EasyOCR 또는 PaddleOCR(위치) + Claude(오타 교정 · 문단 묶기 · 제목/본문 · 강조 · 글머리 · 워터마크 · 개체 찾기)
  ├─ 글자 지우기    LaMa 인페인팅(없으면 OpenCV)
  ├─ 그림 분리      Claude 상자 + SAM 2 윤곽, 가려진 부분 채우기 (사진 배경이면 자동 생략)
  ├─ 캐시           슬라이드별 인식 결과 저장 → 글꼴·옵션만 바꿔 몇 초 만에 재조립
@@ -22,6 +22,7 @@ Turn image-only slides into editable PPTX: real text boxes, movable picture piec
 pip install -e ".[claude,ui]"              # 핵심 + Claude + 웹 UI (CPU, PDF 텍스트층·OpenCV 지우기)
 pip install -e ".[all]"                    # + EasyOCR, SAM 2, LaMa (GPU 권장)
 pip install --no-deps simple-lama-inpainting   # LaMa는 옛 Pillow를 요구하므로 --no-deps
+pip install -e ".[paddle]"                 # 선택: PaddleOCR (Python 3.9~3.13)
 export ANTHROPIC_API_KEY=sk-ant-...        # 선택. 없으면 규칙 기반으로 동작
 unflatten doctor                           # 의존성 · GPU · 키 확인
 ```
@@ -52,9 +53,20 @@ print(res.out_path, res.report_path, res.cost_line())
 
 | 값 | 결과 | 비용·시간 |
 |---|---|---|
-| `text` | 텍스트 상자 + 글자 지운 배경 한 장 | 가장 빠름, Claude 호출 1회/장 |
+| `text` | 텍스트 상자 + 글자 지운 배경 한 장 (그림은 나누지 않고 배경에 그대로) | 가장 빠름, Claude 호출 1회/장 |
 | `objects` | + 그림을 통째로 조각 분리 | 중간 |
 | `full` (기본) | + 그림 속 개별 사물까지 분리, 가려진 부분 채움 | SAM 2 사용, GPU 권장 |
+
+### 글자 인식 엔진 (`--ocr`)
+
+| 값 | 특징 |
+|---|---|
+| `auto` (기본) | 설치된 것 중 EasyOCR → PaddleOCR → Claude 순 |
+| `easyocr` | 기본 설치. 둥근 꾸밈 제목 글씨에 강한 편 |
+| `paddleocr` | 본문 한글 인식이 더 정확한 경우가 많음(조사 오인식이 적음). 단어 단위 결과를 줄로 합치고, 꾸밈 제목의 외곽선이 한 번 더 읽힌 줄·기호만 있는 줄은 버림. CPU에서는 EasyOCR보다 느림 |
+| `claude` | OCR 없이 Claude가 글자 위치까지 찾음. 위치 정확도가 낮아 OCR이 없을 때만 권장 |
+
+고른 엔진이 설치되어 있지 않으면 다른 무료 엔진으로 대신하고 로그에 알립니다. Windows에서 PaddlePaddle과 PyTorch를 함께 쓰면 PyTorch를 먼저 불러와야 해서, 백엔드가 그 순서를 지킵니다.
 
 ### 결과 PPTX 구조
 
@@ -97,7 +109,7 @@ Claude는 슬라이드 1장당 이미지 1장 + 줄 목록을 보내고 구조�
 unflatten/
   config.py      Config · 프리셋 · 언어 프로필 · 모델 가격표 · 슬라이드 범위
   inputs.py      PPTX/PDF/이미지 로딩, 통이미지 판별, PDF 텍스트층 + 텍스트 지운 렌더 + 내장 이미지 추출
-  ocr.py         EasyOCR / Claude / 없음 백엔드
+  ocr.py         EasyOCR / PaddleOCR / Claude / 없음 백엔드, 엔진 선택(resolve_ocr)
   claude_client.py  구조화 출력(블록·개체·배경 종류·워터마크), fallback, 토큰·비용 집계
   layout.py      규칙 기반 묶기, PDF 문단 병합, 글꼴 파일로 폭·높이 맞춤, 색 추출
   inpaint.py     글자/워터마크 마스크, LaMa → OpenCV

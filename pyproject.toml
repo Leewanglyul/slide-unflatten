@@ -22,6 +22,7 @@ dependencies = [
 [project.optional-dependencies]
 claude = ["anthropic>=0.60"]
 ocr = ["easyocr>=1.7", "torch>=2.1"]
+paddle = ["paddleocr>=3.0", "paddlepaddle>=3.0"]
 segment = ["ultralytics>=8.3"]
 inpaint = ["simple-lama-inpainting>=0.1.2"]
 ui = ["gradio>=4.40"]

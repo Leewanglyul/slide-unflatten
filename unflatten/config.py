@@ -20,10 +20,23 @@ USD_KRW = 1400.0
 # mode: text    = text boxes only, background untouched except text removal (fast, cheap)
 #       objects = text + whole illustrations as pieces (coarse)
 #       full    = text + every object inside illustrations as pieces (fine)
+# OCR engines a user can pick ("auto" = first installed of EasyOCR, PaddleOCR, then Claude)
+OCR_CHOICES = {
+    "auto":      {"label_ko": "자동 (설치된 것 중 EasyOCR → PaddleOCR → Claude 순)", "label_en": "Auto (EasyOCR → PaddleOCR → Claude)"},
+    "easyocr":   {"label_ko": "EasyOCR (무료, 기본 설치)", "label_en": "EasyOCR (free, installed by default)"},
+    "paddleocr": {"label_ko": "PaddleOCR (무료, 한국어에 더 정확한 경우가 많음, 추가 설치)",
+                  "label_en": "PaddleOCR (free, often more accurate on Korean, extra install)"},
+    "claude":    {"label_ko": "Claude가 직접 글자 위치까지 찾기 (유료, 위치 정확도 낮음)",
+                  "label_en": "Claude finds text positions itself (paid, less precise positions)"},
+}
+
 PRESETS = {
-    "text":    {"split_objects": False, "object_detail": "none",   "label_ko": "텍스트만 (빠름·저렴)",      "label_en": "Text only (fast)"},
-    "objects": {"split_objects": True,  "object_detail": "coarse", "label_ko": "텍스트 + 그림 통째",       "label_en": "Text + whole pictures"},
-    "full":    {"split_objects": True,  "object_detail": "fine",   "label_ko": "완전 분리 (그림 속 개체까지)", "label_en": "Full split (objects inside pictures)"},
+    "text":    {"split_objects": False, "object_detail": "none",
+                "label_ko": "글자만 편집 가능하게 (그림은 배경에 그대로)", "label_en": "Text only (pictures stay in the background)"},
+    "objects": {"split_objects": True,  "object_detail": "coarse",
+                "label_ko": "글자 + 그림 덩어리 분리", "label_en": "Text + whole pictures"},
+    "full":    {"split_objects": True,  "object_detail": "fine",
+                "label_ko": "글자 + 그림 속 사람·물건까지 분리", "label_en": "Text + objects inside pictures"},
 }
 
 # ───────────── language profiles ─────────────
@@ -35,20 +48,20 @@ _LINUX_CJK = [
     "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
 ]
 LANGUAGE_PROFILES = {
-    "ko": {"label": "한국어 + 영어", "easyocr": ["ko", "en"], "lang_tag": "ko-KR",
+    "ko": {"label": "한국어 + 영어", "easyocr": ["ko", "en"], "paddle": "korean", "lang_tag": "ko-KR",
            "font_regular": "맑은 고딕", "font_bold": "맑은 고딕",
            "measure": [(_WIN + "malgun.ttf", _WIN + "malgunbd.ttf"),
                        ("/usr/share/fonts/truetype/nanum/NanumGothic.ttf", "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf"),
                        (_LINUX_CJK[0], _LINUX_CJK[0]), (_LINUX_CJK[1], _LINUX_CJK[1])]},
-    "en": {"label": "English", "easyocr": ["en"], "lang_tag": "en-US",
+    "en": {"label": "English", "easyocr": ["en"], "paddle": "en", "lang_tag": "en-US",
            "font_regular": "Calibri", "font_bold": "Calibri",
            "measure": [(_WIN + "calibri.ttf", _WIN + "calibrib.ttf"),
                        ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
                        ("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf")]},
-    "ja": {"label": "日本語 + English", "easyocr": ["ja", "en"], "lang_tag": "ja-JP",
+    "ja": {"label": "日本語 + English", "easyocr": ["ja", "en"], "paddle": "japan", "lang_tag": "ja-JP",
            "font_regular": "Yu Gothic", "font_bold": "Yu Gothic",
            "measure": [(_WIN + "YuGothR.ttc", _WIN + "YuGothB.ttc"), (_LINUX_CJK[0], _LINUX_CJK[0]), (_LINUX_CJK[1], _LINUX_CJK[1])]},
-    "zh": {"label": "中文 + English", "easyocr": ["ch_sim", "en"], "lang_tag": "zh-CN",
+    "zh": {"label": "中文 + English", "easyocr": ["ch_sim", "en"], "paddle": "ch", "lang_tag": "zh-CN",
            "font_regular": "Microsoft YaHei", "font_bold": "Microsoft YaHei",
            "measure": [(_WIN + "msyh.ttc", _WIN + "msyhbd.ttc"), (_LINUX_CJK[0], _LINUX_CJK[0]), (_LINUX_CJK[1], _LINUX_CJK[1])]},
 }
@@ -71,7 +84,7 @@ class Config:
     api_key: Optional[str] = None           # None -> ANTHROPIC_API_KEY env
     effort: str = "low"
     # OCR / vision backends
-    ocr_backend: str = "auto"               # auto | easyocr | claude | none
+    ocr_backend: str = "auto"               # auto | easyocr | paddleocr | claude | none
     sam_model: str = "sam2.1_l.pt"
     pdf_dpi: int = 150
     # fonts
@@ -122,6 +135,10 @@ class Config:
     @property
     def easyocr_langs(self) -> List[str]:
         return self.profile["easyocr"]
+
+    @property
+    def paddle_lang(self) -> str:
+        return self.profile["paddle"]
 
     @property
     def lang_tag(self) -> str:

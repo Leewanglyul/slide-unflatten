@@ -13,7 +13,8 @@ def _add_common(p: argparse.ArgumentParser):
     p.add_argument("--lang", choices=list(LANGUAGE_PROFILES), default="ko", help="slide language profile")
     p.add_argument("--model", choices=list(MODELS), default="claude-opus-5-5")
     p.add_argument("--no-claude", action="store_true", help="heuristics only (no API calls)")
-    p.add_argument("--ocr", choices=["auto", "easyocr", "claude", "none"], default="auto")
+    p.add_argument("--ocr", choices=["auto", "easyocr", "paddleocr", "claude", "none"], default="auto",
+                   help="text recognition engine (paddleocr needs: pip install paddleocr paddlepaddle)")
     p.add_argument("--font", help="regular .ttf/.otf for body text")
     p.add_argument("--font-bold", help="bold .ttf/.otf for titles/emphasis")
     p.add_argument("--font-name", help="font name to write when no font file is given")
@@ -58,7 +59,7 @@ def doctor():
     import importlib
     print("python", sys.version.split()[0])
     for m, what in [("pptx", "PPTX"), ("pymupdf", "PDF"), ("cv2", "OpenCV"), ("fontTools", "fonts"),
-                    ("anthropic", "Claude API"), ("easyocr", "OCR (optional)"), ("ultralytics", "SAM 2 (optional)"),
+                    ("anthropic", "Claude API"), ("easyocr", "OCR (optional)"), ("paddleocr", "PaddleOCR (optional)"), ("ultralytics", "SAM 2 (optional)"),
                     ("simple_lama_inpainting", "LaMa (optional)"), ("gradio", "UI (optional)")]:
         try:
             importlib.import_module(m)

@@ -133,3 +133,42 @@ def test_soft_alpha_rim():
     hard, soft = soft_alpha(m, 0), soft_alpha(m, 1.0)
     assert set(np.unique(hard)) <= {0, 255}
     assert soft[20, 20] == 255 and 0 < soft[20, 9] < 255           # opaque core, anti-aliased rim
+
+
+def test_merge_words_joins_a_line_but_not_the_next():
+    """PaddleOCR returns words; same-line neighbours (even slightly overlapping boxes) become one line,
+    the next line down and a far-away word stay separate."""
+    from unflatten.ocr import merge_words
+    words = [Line(box=(100, 50, 180, 90), text="개인의", conf=1.0),
+             Line(box=(190, 50, 290, 90), text="차이를", conf=1.0),
+             Line(box=(280, 52, 400, 91), text="고려하여", conf=0.9),        # overlaps the previous box a little
+             Line(box=(100, 100, 220, 140), text="약자를", conf=1.0),       # next line
+             Line(box=(900, 50, 980, 90), text="별", conf=1.0)]            # same row, far away
+    out = merge_words(words)
+    assert [l.text for l in out] == ["개인의 차이를 고려하여", "별", "약자를"]
+    assert out[0].box == (100, 50, 400, 91)
+
+
+def test_drop_noise_removes_symbols_and_shadow_duplicates():
+    from unflatten.ocr import drop_noise
+    lines = [Line(box=(900, 50, 1130, 90), text="실질적 평등", conf=0.91),
+             Line(box=(920, 77, 1130, 107), text="일일적 ㅇㅇ", conf=0.40),  # title outline read again, lower
+             Line(box=(1170, 340, 1230, 400), text="√", conf=0.41),          # sparkle
+             Line(box=(100, 500, 300, 540), text="1표", conf=0.99)]
+    assert [l.text for l in drop_noise(lines)] == ["실질적 평등", "1표"]
+
+
+def test_resolve_ocr_choice(monkeypatch):
+    """The engine that will run: the chosen one if installed, else the other free engine, else Claude."""
+    import unflatten.ocr as ocr
+    cfg = Config(ocr_backend="paddleocr")
+    monkeypatch.setattr(ocr, "paddleocr_available", lambda: True)
+    monkeypatch.setattr(ocr, "easyocr_available", lambda: True)
+    assert ocr.resolve_ocr(cfg) == "paddleocr"
+    assert ocr.resolve_ocr(Config(ocr_backend="auto")) == "easyocr"
+    monkeypatch.setattr(ocr, "paddleocr_available", lambda: False)
+    assert ocr.resolve_ocr(cfg) == "easyocr"                                  # not installed → other free OCR
+    monkeypatch.setattr(ocr, "easyocr_available", lambda: False)
+    assert ocr.resolve_ocr(cfg, service=object()) == "claude"
+    assert ocr.resolve_ocr(cfg) == "none"
+    assert ocr.resolve_ocr(Config(ocr_backend="none"), service=object()) == "none"

@@ -27,7 +27,7 @@ from .imageops import classify_background, dominant_colors
 from .inputs import Deck, SlideInput, load_deck
 from .inpaint import box_mask, inpaint, text_mask
 from .layout import FontMeasurer, blocks_from_claude, finalize_blocks, group_heuristic, refit_fonts
-from .ocr import NullOCRBackend, easyocr_available, make_backend
+from .ocr import NullOCRBackend, make_backend, resolve_ocr
 from .report import render_preview, side_by_side, write_html_report
 from .segment import pieces_from_embedded, split_semantic, split_simple
 from .types import Piece, SlideAnalysis, SlideSummary
@@ -129,11 +129,7 @@ def _erase_and_split(si: SlideInput, analysis: SlideAnalysis, cfg: Config, log):
 def _resolve_backend_name(cfg: Config, service, ocr_override) -> str:
     if ocr_override is not None:
         return ocr_override.name
-    if cfg.ocr_backend in ("auto", "easyocr") and easyocr_available():
-        return "easyocr"
-    if cfg.ocr_backend in ("auto", "claude") and service is not None:
-        return "claude"
-    return "none"
+    return resolve_ocr(cfg, service)
 
 
 # ───────────── main ─────────────
