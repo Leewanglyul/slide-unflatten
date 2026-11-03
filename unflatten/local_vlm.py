@@ -22,6 +22,10 @@ from PIL import Image
 from .claude_client import OcrOut, SlideOut, _analysis_prompt
 from .types import Line
 
+class LocalVLMError(RuntimeError):
+    """The local model answered, but not with usable JSON (logged by the pipeline, slide falls back to rules)."""
+
+
 MAX_SIDE = 1280           # smaller than for Claude: image tokens dominate a local model's time and memory
 TIMEOUT_SEC = 600
 
@@ -104,10 +108,14 @@ class LocalVLMService:
             self.input_tokens += int(resp.get("prompt_eval_count") or 0)
             self.output_tokens += int(resp.get("eval_count") or 0)
         content = (resp.get("message") or {}).get("content") or ""
+        if resp.get("done_reason") == "length":
+            raise LocalVLMError(f"answer cut off (num_ctx {self.cfg.local_vlm_ctx}, "
+                                f"prompt {resp.get('prompt_eval_count')} + answer {resp.get('eval_count')} tokens)")
         try:
             return schema_model.model_validate_json(content)
-        except Exception:
-            return None     # malformed answer → the pipeline falls back to heuristics for this slide
+        except Exception as e:   # malformed answer → the pipeline logs it and uses heuristics for this slide
+            raise LocalVLMError(f"invalid JSON ({type(e).__name__}: {str(e).splitlines()[0][:80]}); "
+                                f"answer starts {content[:60]!r}") from e
 
     # ───────── slide analysis ─────────
     def analyze(self, img: Image.Image, lines: List[Line], object_detail: str) -> Optional[SlideOut]:
@@ -117,8 +125,6 @@ class LocalVLMService:
         # objects and watermarks are left to detect.py / watermark.py (see module docstring)
         prompt = _analysis_prompt(sw, sh, listing, "none", False)
         out = self._chat(data, prompt, SlideOut)
-        if out is None:
-            return None
         n = len(lines)
         for b in out.blocks:                                   # drop ids a small model may invent
             b.line_ids = [i for i in b.line_ids if 0 <= i < n]
@@ -134,8 +140,9 @@ class LocalVLMService:
         sw, sh = round(img.width * s), round(img.height * s)
         prompt = (f"이 이미지는 {sw}x{sh} 픽셀의 슬라이드입니다. 보이는 모든 텍스트 줄을 찾아 lines 로 돌려주세요. "
                   "각 줄은 box=[x0,y0,x1,y1] 픽셀 좌표로 감싸고, 텍스트는 이미지에 쓰인 그대로 적습니다.")
-        out = self._chat(data, prompt, OcrOut)
-        if out is None:
+        try:
+            out = self._chat(data, prompt, OcrOut)
+        except LocalVLMError:
             return []
         inv = 1.0 / s
         return [([int(round(v * inv)) for v in l.box], l.text) for l in out.lines if len(l.box) == 4]

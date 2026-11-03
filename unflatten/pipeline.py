@@ -237,7 +237,8 @@ def convert(path: str, cfg: Optional[Config] = None, out_path: Optional[str] = N
                         got = fut.result()
                     except Exception as e:
                         got = None
-                        log("  " + t(lang, "claude_fail", err=f"{type(e).__name__}: {str(e)[:120]}"))
+                        key_fail = "local_vlm_fail" if cfg.vision_backend == "ollama" else "claude_fail"
+                        log("  " + t(lang, key_fail, err=f"{type(e).__name__}: {str(e)[:200]}"))
                         if type(e).__name__ in ("AuthenticationError", "PermissionDeniedError"):
                             log("  " + t(lang, "claude_auth"))
                             state["service"] = None

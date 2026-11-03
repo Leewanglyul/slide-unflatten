@@ -296,3 +296,18 @@ def test_local_vlm_unreachable_falls_back_to_heuristics(flat_png, tmp_path, monk
     res = convert(path, cfg, ocr_override=FakeOCR(lines), log=logs.append)
     assert res.vision == "" and res.summaries[0].n_blocks == 3
     assert any("Ollama not reachable" in str(m) for m in logs)
+
+
+def test_local_vlm_bad_answer_is_logged_and_falls_back(flat_png, tmp_path, monkeypatch):
+    from unflatten import local_vlm
+    monkeypatch.setattr(local_vlm.LocalVLMService, "_get", lambda self, p, timeout=5: {"models": [{"name": "qwen3-vl:8b"}]})
+    monkeypatch.setattr(local_vlm.LocalVLMService, "_post", lambda self, p, body, timeout=600:
+                        {"message": {"content": '{"blocks": [{"line_ids": [0], "te'}, "done_reason": "length",
+                         "prompt_eval_count": 16000, "eval_count": 384})
+    path, lines = flat_png
+    logs = []
+    cfg = Config(mode="text", language="en", vision_backend="ollama", out_dir=str(tmp_path / "out"),
+                 font_regular_file=FONT, font_bold_file=FONT_B)
+    res = convert(path, cfg, ocr_override=FakeOCR(lines), log=logs.append)
+    assert res.summaries[0].n_blocks == 3                       # rules took over
+    assert any("cut off" in str(m) and "num_ctx" in str(m) for m in logs), logs
