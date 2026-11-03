@@ -80,6 +80,10 @@ class Config:
     slide_range: Optional[str] = None       # "1-3,7"  (1-based); None = all
     # Claude
     use_claude: bool = True
+    vision_backend: str = "claude"          # claude | ollama (local model, no key, nothing leaves the computer)
+    local_vlm_model: str = "qwen3-vl:8b"    # any Ollama vision model tag
+    ollama_url: str = "http://localhost:11434"
+    local_vlm_ctx: int = 8192               # context window passed to Ollama (image + OCR listing + answer)
     model: str = DEFAULT_MODEL
     api_key: Optional[str] = None           # None -> ANTHROPIC_API_KEY env
     effort: str = "low"

@@ -13,6 +13,9 @@ def _add_common(p: argparse.ArgumentParser):
     p.add_argument("--lang", choices=list(LANGUAGE_PROFILES), default="ko", help="slide language profile")
     p.add_argument("--model", choices=list(MODELS), default="claude-opus-5-5")
     p.add_argument("--no-claude", action="store_true", help="heuristics only (no API calls)")
+    p.add_argument("--vision", choices=["claude", "ollama"], default="claude",
+                   help="who groups/corrects text: claude (API key) or ollama (local model, no key)")
+    p.add_argument("--local-model", default="qwen3-vl:8b", help="Ollama vision model tag for --vision ollama")
     p.add_argument("--ocr", choices=["auto", "easyocr", "paddleocr", "claude", "none"], default="auto",
                    help="text recognition engine (paddleocr needs: pip install paddleocr paddlepaddle)")
     p.add_argument("--font", help="regular .ttf/.otf for body text")
@@ -43,7 +46,8 @@ def cfg_from_args(a) -> Config:
                   keep_hidden_original=not a.no_hidden_original, group_shapes=not a.no_groups,
                   use_theme_fonts=not a.no_theme_fonts, remove_watermark=not a.no_watermark_removal,
                   make_report=not a.no_report, ui_lang=a.ui_lang,
-                  edge_expand=a.edge_expand, edge_feather=a.edge_feather, local_detect=not a.no_local_detect)
+                  edge_expand=a.edge_expand, edge_feather=a.edge_feather, local_detect=not a.no_local_detect,
+                  vision_backend=a.vision, local_vlm_model=a.local_model)
 
 
 def print_summary(res):

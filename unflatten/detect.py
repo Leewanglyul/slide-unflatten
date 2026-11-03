@@ -78,7 +78,7 @@ def select_objects(dets: Sequence[Tuple[Sequence[float], float]], lines: Sequenc
         kept.append(b)
     name = NAMES.get(lang, NAMES["en"])
     # kept is largest first → layer 0 (back) is the largest
-    return [{"name": name, "box": b, "layer": i} for i, b in enumerate(kept)]
+    return [{"name": name, "box": b, "layer": i, "src": "local"} for i, b in enumerate(kept)]
 
 
 def detect_objects(img: Image.Image, lines: Sequence[Line], cfg, log=None) -> List[dict]:

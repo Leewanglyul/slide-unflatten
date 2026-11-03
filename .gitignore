@@ -10,3 +10,4 @@ samples/out/
 *_report.html
 *_manifest.json
 *_bundle.zip
+*.pt

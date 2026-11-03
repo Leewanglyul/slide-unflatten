@@ -68,6 +68,21 @@ print(res.out_path, res.report_path, res.cost_line())
 
 고른 엔진이 설치되어 있지 않으면 다른 무료 엔진으로 대신하고 로그에 알립니다. Windows에서 PaddlePaddle과 PyTorch를 함께 쓰면 PyTorch를 먼저 불러와야 해서, 백엔드가 그 순서를 지킵니다.
 
+### API 키 없이 쓰기 (로컬 모델)
+
+| 역할 | Claude가 있을 때 | 키가 없을 때 |
+|---|---|---|
+| 워터마크("A Gemini Notebook", "Made with Gamma" 등) | Claude + 규칙 | 규칙(`watermark.py`): 슬라이드 가장자리의 작은 글자 중 생성 도구 표시만 지움 |
+| 그림 속 사람·물건 찾기 (`--mode full`) | Claude 상자 | 로컬 탐지 모델 YOLOE(`detect.py`, ultralytics, 처음 한 번 약 90 MB 다운로드). 못 찾은 도형은 단순 분리. 끄기: `--no-local-detect` |
+| 오타 교정 · 문단 묶기 · 제목/본문 | Claude | `--vision ollama`: [Ollama](https://ollama.com)로 실행하는 로컬 비전 모델(기본 `qwen3-vl:8b`, VRAM 약 8 GB). 이미지가 컴퓨터 밖으로 나가지 않음. 없으면 규칙 기반 |
+
+```bash
+ollama pull qwen3-vl:8b
+unflatten convert deck.pptx --vision ollama              # 다른 모델: --local-model gemma4:12b
+```
+로컬 모델에는 글자 묶기·교정만 맡기고, 그림 위치와 워터마크는 위의 탐지 모델과 규칙이 맡습니다
+(공개 모델은 좌표를 0~1000 비율로 답하는 경우가 많아 픽셀 상자를 믿기 어렵기 때문).
+
 ### 결과 PPTX 구조
 
 | 층 | 이름 | 비고 |

@@ -243,3 +243,55 @@ def test_watermark_removed_by_rule_without_claude(tmp_path):
     bgi = np.asarray(Image.open(io.BytesIO(bg.image.blob)).convert("L"))
     assert bgi[t:b, l:r].min() > 150
 
+
+
+def test_local_vlm_backend_groups_and_corrects_text(flat_png, tmp_path, monkeypatch):
+    """--vision ollama: a local model (faked HTTP here) corrects OCR text; no key, no cost, boxes not trusted."""
+    import json as _json
+    from unflatten import local_vlm
+    path, lines = flat_png
+    bad = list(lines)
+    bad[0] = type(lines[0])(box=lines[0].box, text="Polar Fr0nters Rep0rt", conf=0.6)   # OCR typo
+    calls = []
+
+    def fake_get(self, p, timeout=5):
+        return {"models": [{"name": "qwen3-vl:8b"}]}
+
+    def fake_post(self, p, body, timeout=600):
+        calls.append(body)
+        assert body["model"] == "qwen3-vl:8b" and body["messages"][0]["images"] and body["format"]["type"] == "object"
+        assert "$ref" not in _json.dumps(body["format"])
+        out = {"blocks": [
+            {"line_ids": [0], "text": "Polar Frontiers Report", "role": "title", "bold": True, "align": "left",
+             "bullet": False, "highlights": [], "highlight_color": None},
+            {"line_ids": [1, 2, 99], "text": "Ice is melting faster than expected\nShipping routes are opening",
+             "role": "body", "bold": False, "align": "left", "bullet": True, "highlights": [], "highlight_color": None}],
+            "objects": [{"name": "x", "box": [0, 0, 999, 999], "layer": 0}],      # ignored: left to detect.py
+            "background_type": "flat", "watermarks": [[0, 0, 1000, 1000]]}       # ignored: left to watermark.py
+        return {"message": {"content": _json.dumps(out)}, "prompt_eval_count": 900, "eval_count": 120}
+
+    monkeypatch.setattr(local_vlm.LocalVLMService, "_get", fake_get)
+    monkeypatch.setattr(local_vlm.LocalVLMService, "_post", fake_post)
+    cfg = Config(mode="text", language="en", vision_backend="ollama", out_dir=str(tmp_path / "out"),
+                 font_regular_file=FONT, font_bold_file=FONT_B)
+    res = convert(path, cfg, ocr_override=FakeOCR(bad), log=lambda *a: None)
+    assert len(calls) == 1
+    assert res.vision == "local:qwen3-vl:8b" and res.cost_usd == 0 and "qwen3-vl:8b" in res.cost_line()
+    texts = [sh.text_frame.text for sh in iter_shapes(Presentation(res.out_path).slides[0].shapes) if sh.has_text_frame]
+    assert "Polar Frontiers Report" in texts                       # corrected by the model
+    assert res.summaries[0].n_blocks == 2
+
+
+def test_local_vlm_unreachable_falls_back_to_heuristics(flat_png, tmp_path, monkeypatch):
+    from unflatten import local_vlm
+
+    def down(self, p, timeout=5):
+        raise OSError("connection refused")
+    monkeypatch.setattr(local_vlm.LocalVLMService, "_get", down)
+    path, lines = flat_png
+    logs = []
+    cfg = Config(mode="text", language="en", vision_backend="ollama", out_dir=str(tmp_path / "out"),
+                 font_regular_file=FONT, font_bold_file=FONT_B)
+    res = convert(path, cfg, ocr_override=FakeOCR(lines), log=logs.append)
+    assert res.vision == "" and res.summaries[0].n_blocks == 3
+    assert any("Ollama not reachable" in str(m) for m in logs)

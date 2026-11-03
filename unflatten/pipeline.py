@@ -52,8 +52,11 @@ class Result:
     seconds: float = 0.0
     used_claude: bool = False
     font_files: List[str] = field(default_factory=list)
+    vision: str = ""          # "claude" | "local:<model>" | "" (heuristics only)
 
     def cost_line(self, lang="ko") -> str:
+        if self.vision.startswith("local:"):
+            return t(lang, "cost_local", model=self.vision[6:], inp=self.input_tokens, out=self.output_tokens)
         if self.input_tokens == 0 and not self.used_claude:
             return t(lang, "warn_noclaude")
         return t(lang, "cost", inp=self.input_tokens, out=self.output_tokens, usd=self.cost_usd)
@@ -84,12 +87,24 @@ def estimate(path: str, cfg: Optional[Config] = None) -> Dict:
 
 
 # ───────────── per-slide steps ─────────────
-def _recognise(si: SlideInput, ocr) -> SlideAnalysis:
+def _recognise(si: SlideInput, ocr, cfg: Optional[Config] = None, log=None) -> SlideAnalysis:
     if si.kind == "text_layer":
         lines = si.lines or []
         return SlideAnalysis(lines=lines, blocks=group_heuristic(lines, img_h=si.image.height), objects=[],
                              background_type=classify_background(si.image), source="text_layer")
-    return SlideAnalysis(lines=ocr.lines(si.image), blocks=[], objects=[], background_type="unknown", source=ocr.name)
+    lines, watermarks = ocr.lines(si.image), []
+    if cfg is not None and cfg.remove_watermark:
+        # "A Gemini Notebook" / "Made with Gamma" style marks found by rule (watermark.py), before any model
+        # sees the lines, so they never become text boxes whichever backend groups the text
+        wm_idx, wm_boxes = find_watermarks(lines, si.image.size)
+        if wm_idx:
+            if log:
+                log("  " + t(cfg.ui_lang, "watermark_rule", texts=", ".join(lines[i].text for i in wm_idx)))
+            drop = set(wm_idx)
+            lines = [ln for i, ln in enumerate(lines) if i not in drop]
+            watermarks = [tuple(b) for b in wm_boxes]
+    return SlideAnalysis(lines=lines, blocks=[], objects=[], background_type="unknown", source=ocr.name,
+                         watermarks=watermarks)
 
 
 def _analyse_with_claude(si: SlideInput, analysis: SlideAnalysis, cfg: Config, service):
@@ -120,7 +135,7 @@ def _erase_and_split(si: SlideInput, analysis: SlideAnalysis, cfg: Config, log):
                 log("  " + t(cfg.ui_lang, "split_sam", names=", ".join(o["name"] for o in analysis.objects)))
                 try:
                     background, pieces = split_semantic(clean, analysis.objects, cfg, log)
-                    if pieces and not analysis.used_claude:
+                    if pieces and any(o.get("src") == "local" for o in analysis.objects):
                         # objects came from the local detector (detect.py), which misses plain shapes and
                         # decorations: cut whatever is left the simple way and put it behind the detected objects
                         background, rest = split_simple(background, cfg, log)
@@ -162,7 +177,14 @@ def convert(path: str, cfg: Optional[Config] = None, out_path: Optional[str] = N
 
     # services (resolved up front so the cache key reflects what really runs)
     service = None
-    if cfg.use_claude and cfg.resolved_api_key():
+    if cfg.vision_backend == "ollama":
+        from .local_vlm import LocalVLMService
+        service = LocalVLMService(cfg)
+        ok, msg = service.validate()
+        log(t(lang, "local_vlm", msg=msg))
+        if not ok:
+            service = None
+    elif cfg.use_claude and cfg.resolved_api_key():
         try:
             from .claude_client import ClaudeService
             service = ClaudeService(cfg)
@@ -224,18 +246,12 @@ def convert(path: str, cfg: Optional[Config] = None, out_path: Optional[str] = N
                                 if f2 is not None:
                                     f2.cancel()
                     if got is not None:
+                        rule_wm = list(analysis.watermarks)
                         analysis.blocks, analysis.objects, analysis.background_type, analysis.watermarks = got
+                        analysis.watermarks = rule_wm + [tuple(w) for w in analysis.watermarks]
                         analysis.used_claude = True
-                if cfg.remove_watermark and si.kind == "flat" and not analysis.used_claude:
-                    # no Claude: find "A Gemini Notebook" / "Made with Gamma" style marks by rule (watermark.py)
-                    wm_idx, wm_boxes = find_watermarks(analysis.lines, si.image.size)
-                    if wm_idx:
-                        log("  " + t(lang, "watermark_rule", texts=", ".join(analysis.lines[i].text for i in wm_idx)))
-                        drop = set(wm_idx)
-                        analysis.lines = [ln for i, ln in enumerate(analysis.lines) if i not in drop]
-                        analysis.watermarks = [tuple(b) for b in analysis.watermarks] + [tuple(b) for b in wm_boxes]
-                if (si.kind == "flat" and not analysis.used_claude and cfg.local_detect and cfg.split_objects
-                        and cfg.object_detail == "fine" and not analysis.objects):
+                if (si.kind == "flat" and cfg.local_detect and cfg.split_objects and cfg.object_detail == "fine"
+                        and not analysis.objects and (not analysis.used_claude or cfg.vision_backend == "ollama")):
                     # no Claude: find people / things with a local open-vocabulary detector (detect.py)
                     analysis.objects = detect_objects(si.image, analysis.lines, cfg, log)
                     if analysis.objects:
@@ -293,7 +309,8 @@ def convert(path: str, cfg: Optional[Config] = None, out_path: Optional[str] = N
     for si in work:
         key = known_keys.get(si.index)
         if not key or not cache.has(key):
-            key = SlideCache.key(si.image, cfg, backend_name, state["service"] is not None, cfg.model)
+            key = SlideCache.key(si.image, cfg, backend_name, state["service"] is not None,
+                                 getattr(state["service"], "model", cfg.model))
         item = {"si": si, "key": key}
         if cache.has(key):
             item["cached"] = True
@@ -307,7 +324,7 @@ def convert(path: str, cfg: Optional[Config] = None, out_path: Optional[str] = N
             if ocr is None and si.kind == "flat":
                 ocr = make_backend(cfg, state["service"], log)
             try:
-                item["analysis"] = _recognise(si, ocr or NullOCRBackend())
+                item["analysis"] = _recognise(si, ocr or NullOCRBackend(), cfg, log)
                 if si.kind == "flat" and state["service"] is not None and pool is not None:
                     item["future"] = pool.submit(_analyse_with_claude, si, item["analysis"], cfg, state["service"])
             except Exception as e:
@@ -345,6 +362,7 @@ def convert(path: str, cfg: Optional[Config] = None, out_path: Optional[str] = N
                  summaries=ordered, previews=pv_list, seconds=time.time() - t0, used_claude=service is not None)
     if service is not None:
         res.cost_usd, res.input_tokens, res.output_tokens = service.cost_usd, service.input_tokens, service.output_tokens
+        res.vision = f"local:{service.model}" if cfg.vision_backend == "ollama" else "claude"
     if cfg.bundle_fonts:
         res.font_files = bundle_fonts(plan, out_dir)
     if cfg.make_report:
