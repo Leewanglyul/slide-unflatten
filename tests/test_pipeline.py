@@ -261,6 +261,7 @@ def test_local_vlm_backend_groups_and_corrects_text(flat_png, tmp_path, monkeypa
         calls.append(body)
         assert body["model"] == "qwen3-vl:8b" and body["messages"][0]["images"] and body["format"]["type"] == "object"
         assert "$ref" not in _json.dumps(body["format"])
+        assert body["think"] is False
         out = {"blocks": [
             {"line_ids": [0], "text": "Polar Frontiers Report", "role": "title", "bold": True, "align": "left",
              "bullet": False, "highlights": [], "highlight_color": None},

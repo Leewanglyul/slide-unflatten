@@ -89,8 +89,17 @@ class LocalVLMService:
         body = {"model": self.model, "stream": False,
                 "messages": [{"role": "user", "content": prompt + "\n\nJSON으로만 답하세요.", "images": [image_b64]}],
                 "format": _inline_refs(schema_model.model_json_schema()),
-                "options": {"temperature": 0, "num_ctx": self.cfg.local_vlm_ctx}}
-        resp = self._post("/api/chat", body)
+                "options": {"temperature": 0, "num_ctx": self.cfg.local_vlm_ctx},
+                # qwen3-vl and similar "thinking" models otherwise write a long reasoning trace before the JSON,
+                # which takes minutes per slide on a local GPU; a model without the switch rejects it → retry
+                "think": False}
+        try:
+            resp = self._post("/api/chat", body)
+        except urllib.error.HTTPError as e:
+            if e.code != 400:
+                raise
+            body.pop("think")
+            resp = self._post("/api/chat", body)
         with self._lock:
             self.input_tokens += int(resp.get("prompt_eval_count") or 0)
             self.output_tokens += int(resp.get("eval_count") or 0)
