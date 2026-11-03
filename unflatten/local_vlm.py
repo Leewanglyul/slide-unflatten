@@ -89,11 +89,26 @@ class LocalVLMService:
         im.save(buf, format="JPEG", quality=90)
         return base64.b64encode(buf.getvalue()).decode(), scale
 
+    # 1st try deterministic; if the answer runs away (a small model can repeat itself inside a JSON string until it
+    # hits the limit) or is not valid JSON, try once more with a little randomness and a repetition penalty
+    ATTEMPTS = ({"temperature": 0},
+                {"temperature": 0.3, "repeat_penalty": 1.15, "repeat_last_n": 256})
+
     def _chat(self, image_b64: str, prompt: str, schema_model):
+        errors = []
+        for opts in self.ATTEMPTS:
+            try:
+                return self._chat_once(image_b64, prompt, schema_model, opts)
+            except LocalVLMError as e:
+                errors.append(str(e))
+        raise LocalVLMError(" / retry: ".join(errors))
+
+    def _chat_once(self, image_b64: str, prompt: str, schema_model, opts: dict):
         body = {"model": self.model, "stream": False,
                 "messages": [{"role": "user", "content": prompt + "\n\nJSON으로만 답하세요.", "images": [image_b64]}],
                 "format": _inline_refs(schema_model.model_json_schema()),
-                "options": {"temperature": 0, "num_ctx": self.cfg.local_vlm_ctx},
+                # num_predict caps the answer: a whole slide fits in well under 4096 tokens, a runaway answer does not
+                "options": {"num_ctx": self.cfg.local_vlm_ctx, "num_predict": self.cfg.local_vlm_max_answer, **opts},
                 # qwen3-vl and similar "thinking" models otherwise write a long reasoning trace before the JSON,
                 # which takes minutes per slide on a local GPU; a model without the switch rejects it → retry
                 "think": False}
@@ -109,8 +124,8 @@ class LocalVLMService:
             self.output_tokens += int(resp.get("eval_count") or 0)
         content = (resp.get("message") or {}).get("content") or ""
         if resp.get("done_reason") == "length":
-            raise LocalVLMError(f"answer cut off (num_ctx {self.cfg.local_vlm_ctx}, "
-                                f"prompt {resp.get('prompt_eval_count')} + answer {resp.get('eval_count')} tokens)")
+            raise LocalVLMError(f"answer cut off at {resp.get('eval_count')} tokens "
+                                f"(limit {self.cfg.local_vlm_max_answer}, prompt {resp.get('prompt_eval_count')})")
         try:
             return schema_model.model_validate_json(content)
         except Exception as e:   # malformed answer → the pipeline logs it and uses heuristics for this slide

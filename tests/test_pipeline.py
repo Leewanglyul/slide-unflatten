@@ -310,4 +310,32 @@ def test_local_vlm_bad_answer_is_logged_and_falls_back(flat_png, tmp_path, monke
                  font_regular_file=FONT, font_bold_file=FONT_B)
     res = convert(path, cfg, ocr_override=FakeOCR(lines), log=logs.append)
     assert res.summaries[0].n_blocks == 3                       # rules took over
-    assert any("cut off" in str(m) and "num_ctx" in str(m) for m in logs), logs
+    assert any("cut off" in str(m) and "retry" in str(m) for m in logs), logs
+
+
+def test_local_vlm_retries_a_runaway_answer(flat_png, tmp_path, monkeypatch):
+    """1st answer runs away (cut off) → one retry with a repetition penalty; its good answer is used."""
+    import json as _json
+    from unflatten import local_vlm
+    monkeypatch.setattr(local_vlm.LocalVLMService, "_get", lambda self, p, timeout=5: {"models": [{"name": "qwen3-vl:8b"}]})
+    bodies = []
+    good = {"blocks": [{"line_ids": [0], "text": "Polar Frontiers Report", "role": "title", "bold": True, "align": "left",
+                        "bullet": False, "highlights": [], "highlight_color": None}],
+            "objects": [], "background_type": "flat", "watermarks": []}
+
+    def post(self, p, body, timeout=600):
+        bodies.append(body)
+        if len(bodies) == 1:
+            return {"message": {"content": '{"blocks": [{"text": "aaaa'}, "done_reason": "length",
+                    "prompt_eval_count": 2000, "eval_count": 4096}
+        return {"message": {"content": _json.dumps(good)}, "done_reason": "stop"}
+    monkeypatch.setattr(local_vlm.LocalVLMService, "_post", post)
+    path, lines = flat_png
+    cfg = Config(mode="text", language="en", vision_backend="ollama", out_dir=str(tmp_path / "out"),
+                 font_regular_file=FONT, font_bold_file=FONT_B)
+    res = convert(path, cfg, ocr_override=FakeOCR(lines), log=lambda *a: None)
+    assert len(bodies) == 2
+    assert bodies[0]["options"]["num_predict"] == 4096 and bodies[0]["options"]["temperature"] == 0
+    assert bodies[1]["options"]["repeat_penalty"] > 1
+    assert res.summaries[0].n_blocks >= 1 and res.vision == "local:qwen3-vl:8b"
+

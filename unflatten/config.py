@@ -84,6 +84,7 @@ class Config:
     local_vlm_model: str = "qwen3-vl:8b"    # any Ollama vision model tag
     ollama_url: str = "http://localhost:11434"
     local_vlm_ctx: int = 16384              # context window passed to Ollama (image + OCR listing + answer)
+    local_vlm_max_answer: int = 4096        # cap on answer tokens (a runaway, repeating answer is cut and retried)
     model: str = DEFAULT_MODEL
     api_key: Optional[str] = None           # None -> ANTHROPIC_API_KEY env
     effort: str = "low"
