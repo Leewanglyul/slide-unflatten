@@ -8,7 +8,7 @@ from unflatten.builder import iter_shapes
 from unflatten.config import Config
 from unflatten.inputs import load_deck
 from unflatten.pipeline import convert, estimate, rebuild, bundle_zip
-from tests.conftest import FakeOCR, FONT, FONT_B, FONT_MONO
+from tests.conftest import FakeOCR, FONT, FONT_B, FONT_MONO, draw_slide
 
 NS = {"a": "http://schemas.openxmlformats.org/drawingml/2006/main", "p": "http://schemas.openxmlformats.org/presentationml/2006/main"}
 
@@ -213,3 +213,33 @@ def test_rebuild_with_new_edge_settings_resplits_without_recognition(flat_png, t
     _, _, soft = cache.load(res2.summaries[0].cache_key)
     assert any(len(set(np.unique(p.rgba[..., 3]))) > 2 for p in soft)   # soft edges now
     assert cache.split_params(key)["edge_feather"] == 1.5
+
+
+def test_watermark_removed_by_rule_without_claude(tmp_path):
+    """Without Claude, a "A Gemini Notebook" mark in the corner is erased instead of becoming a text box."""
+    from PIL import ImageDraw, ImageFont
+    from unflatten.types import Line
+    img, lines = draw_slide()
+    d = ImageDraw.Draw(img)
+    f = ImageFont.truetype(FONT, 14)
+    text = "A Gemini Notebook"
+    l, t, r, b = d.textbbox((1130, 695), text, font=f)
+    d.text((1130, 695), text, fill=(90, 90, 90), font=f)
+    lines = lines + [Line(box=(int(l), int(t), int(r) + 1, int(b) + 1), text=text, conf=0.9)]
+    path = tmp_path / "wm.png"
+    img.save(path)
+    cfg = Config(mode="text", language="en", use_claude=False, out_dir=str(tmp_path / "out"),
+                 font_regular_file=FONT, font_bold_file=FONT_B)
+    res = convert(str(path), cfg, ocr_override=FakeOCR(lines), log=lambda *a: None)
+    slide = Presentation(res.out_path).slides[0]
+    texts = [sh.text_frame.text for sh in iter_shapes(slide.shapes) if sh.has_text_frame]
+    assert "Polar Frontiers Report" in texts
+    assert not any("Gemini" in t for t in texts)
+    # the mark is gone from the background too: no dark ink left in its box
+    import io
+    import numpy as np
+    from PIL import Image
+    bg = next(sh for sh in iter_shapes(slide.shapes) if sh.name in ("배경", "background"))
+    bgi = np.asarray(Image.open(io.BytesIO(bg.image.blob)).convert("L"))
+    assert bgi[t:b, l:r].min() > 150
+

@@ -159,7 +159,9 @@ class Config:
     def cache_key_fields(self) -> dict:
         """Config parts that change recognition results (not assembly). Which OCR/Claude backend actually ran
         is added by the pipeline (resolved at run time), so degraded runs never masquerade as full ones."""
-        return {"mode": self.mode, "language": self.language, "dpi": self.pdf_dpi, "watermark": self.remove_watermark}
+        from .watermark import RULE_VERSION
+        return {"mode": self.mode, "language": self.language, "dpi": self.pdf_dpi, "watermark": self.remove_watermark,
+                "wm_rule": RULE_VERSION if self.remove_watermark else 0}
 
     def split_params(self) -> dict:
         """Parts that change only the erase/split step. Cached recognition (OCR, Claude) is reused when

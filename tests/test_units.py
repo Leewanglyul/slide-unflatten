@@ -172,3 +172,27 @@ def test_resolve_ocr_choice(monkeypatch):
     assert ocr.resolve_ocr(cfg, service=object()) == "claude"
     assert ocr.resolve_ocr(cfg) == "none"
     assert ocr.resolve_ocr(Config(ocr_backend="none"), service=object()) == "none"
+
+
+def test_watermark_rule_matches_generator_marks_near_edge():
+    from unflatten.types import Line
+    from unflatten.watermark import find_watermarks, is_watermark_text
+    for t in ("A Gemini Notebook", "NotebookLM", "Made with Gamma", "made with  CANVA", "gamma.app"):
+        assert is_watermark_text(t), t
+    for t in ("Democracy", "My notebook", "Gamma rays", "Made with love"):
+        assert not is_watermark_text(t), t
+    w, h = 1376, 768
+    lines = [Line(box=(1290, 745, 1370, 760), text="A Gemini Notebook"),      # bottom-right corner, small → mark
+             Line(box=(600, 380, 780, 400), text="A Gemini Notebook"),        # middle of slide → content
+             Line(box=(1200, 700, 1370, 760), text="Made with Gamma"),        # too tall (60px > 5%) → content
+             Line(box=(80, 70, 900, 120), text="Polar Frontiers Report")]
+    idx, boxes = find_watermarks(lines, (w, h))
+    assert idx == [0]
+    x0, y0, x1, y1 = boxes[0]
+    assert x0 < 1290 - 15 and y0 < 745 and x1 == w and y1 <= h   # widened left for the logo icon, clipped
+
+
+def test_cache_key_changes_with_watermark_rule():
+    from unflatten.config import Config
+    on, off = Config(remove_watermark=True).cache_key_fields(), Config(remove_watermark=False).cache_key_fields()
+    assert on["wm_rule"] >= 1 and off["wm_rule"] == 0

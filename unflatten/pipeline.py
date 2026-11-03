@@ -31,6 +31,7 @@ from .ocr import NullOCRBackend, make_backend, resolve_ocr
 from .report import render_preview, side_by_side, write_html_report
 from .segment import pieces_from_embedded, split_semantic, split_simple
 from .types import Piece, SlideAnalysis, SlideSummary
+from .watermark import find_watermarks
 
 Progress = Callable[[int, int, str], None]
 SEC_PER_SLIDE_GPU = 15
@@ -219,6 +220,14 @@ def convert(path: str, cfg: Optional[Config] = None, out_path: Optional[str] = N
                     if got is not None:
                         analysis.blocks, analysis.objects, analysis.background_type, analysis.watermarks = got
                         analysis.used_claude = True
+                if cfg.remove_watermark and si.kind == "flat" and not analysis.used_claude:
+                    # no Claude: find "A Gemini Notebook" / "Made with Gamma" style marks by rule (watermark.py)
+                    wm_idx, wm_boxes = find_watermarks(analysis.lines, si.image.size)
+                    if wm_idx:
+                        log("  " + t(lang, "watermark_rule", texts=", ".join(analysis.lines[i].text for i in wm_idx)))
+                        drop = set(wm_idx)
+                        analysis.lines = [ln for i, ln in enumerate(analysis.lines) if i not in drop]
+                        analysis.watermarks = [tuple(b) for b in analysis.watermarks] + [tuple(b) for b in wm_boxes]
                 if not analysis.blocks:
                     analysis.blocks = group_heuristic(analysis.lines, img_h=si.image.height)
                 if analysis.background_type == "unknown":
