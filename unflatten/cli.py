@@ -30,6 +30,8 @@ def _add_common(p: argparse.ArgumentParser):
     p.add_argument("--no-groups", action="store_true")
     p.add_argument("--no-theme-fonts", action="store_true")
     p.add_argument("--no-watermark-removal", action="store_true")
+    p.add_argument("--no-local-detect", action="store_true",
+                   help="mode full without Claude: do not use the local object detector (YOLOE)")
     p.add_argument("--no-report", action="store_true")
     p.add_argument("--ui-lang", choices=["ko", "en"], default="ko")
 
@@ -41,7 +43,7 @@ def cfg_from_args(a) -> Config:
                   keep_hidden_original=not a.no_hidden_original, group_shapes=not a.no_groups,
                   use_theme_fonts=not a.no_theme_fonts, remove_watermark=not a.no_watermark_removal,
                   make_report=not a.no_report, ui_lang=a.ui_lang,
-                  edge_expand=a.edge_expand, edge_feather=a.edge_feather)
+                  edge_expand=a.edge_expand, edge_feather=a.edge_feather, local_detect=not a.no_local_detect)
 
 
 def print_summary(res):

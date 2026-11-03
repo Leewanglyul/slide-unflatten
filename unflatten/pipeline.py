@@ -31,6 +31,7 @@ from .ocr import NullOCRBackend, make_backend, resolve_ocr
 from .report import render_preview, side_by_side, write_html_report
 from .segment import pieces_from_embedded, split_semantic, split_simple
 from .types import Piece, SlideAnalysis, SlideSummary
+from .detect import detect_objects
 from .watermark import find_watermarks
 
 Progress = Callable[[int, int, str], None]
@@ -119,6 +120,11 @@ def _erase_and_split(si: SlideInput, analysis: SlideAnalysis, cfg: Config, log):
                 log("  " + t(cfg.ui_lang, "split_sam", names=", ".join(o["name"] for o in analysis.objects)))
                 try:
                     background, pieces = split_semantic(clean, analysis.objects, cfg, log)
+                    if pieces and not analysis.used_claude:
+                        # objects came from the local detector (detect.py), which misses plain shapes and
+                        # decorations: cut whatever is left the simple way and put it behind the detected objects
+                        background, rest = split_simple(background, cfg, log)
+                        pieces = rest + pieces
                 except Exception as e:
                     log("  " + t(cfg.ui_lang, "sam_fail", err=str(e)[:120]))
             if not pieces:
@@ -228,6 +234,12 @@ def convert(path: str, cfg: Optional[Config] = None, out_path: Optional[str] = N
                         drop = set(wm_idx)
                         analysis.lines = [ln for i, ln in enumerate(analysis.lines) if i not in drop]
                         analysis.watermarks = [tuple(b) for b in analysis.watermarks] + [tuple(b) for b in wm_boxes]
+                if (si.kind == "flat" and not analysis.used_claude and cfg.local_detect and cfg.split_objects
+                        and cfg.object_detail == "fine" and not analysis.objects):
+                    # no Claude: find people / things with a local open-vocabulary detector (detect.py)
+                    analysis.objects = detect_objects(si.image, analysis.lines, cfg, log)
+                    if analysis.objects:
+                        log("  " + t(lang, "local_detect", n=len(analysis.objects), model=cfg.local_detector))
                 if not analysis.blocks:
                     analysis.blocks = group_heuristic(analysis.lines, img_h=si.image.height)
                 if analysis.background_type == "unknown":

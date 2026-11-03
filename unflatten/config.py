@@ -86,6 +86,9 @@ class Config:
     # OCR / vision backends
     ocr_backend: str = "auto"               # auto | easyocr | paddleocr | claude | none
     sam_model: str = "sam2.1_l.pt"
+    local_detect: bool = True               # mode "full" without Claude: find objects with a local model (detect.py)
+    local_detector: str = "yoloe-26l-seg-pf.pt"   # ultralytics YOLOE prompt-free (open source, downloaded once)
+    detect_conf: float = 0.45
     pdf_dpi: int = 150
     # fonts
     font_regular_file: Optional[str] = None
@@ -161,7 +164,9 @@ class Config:
         is added by the pipeline (resolved at run time), so degraded runs never masquerade as full ones."""
         from .watermark import RULE_VERSION
         return {"mode": self.mode, "language": self.language, "dpi": self.pdf_dpi, "watermark": self.remove_watermark,
-                "wm_rule": RULE_VERSION if self.remove_watermark else 0}
+                "wm_rule": RULE_VERSION if self.remove_watermark else 0,
+                "detector": f"{self.local_detector}@{self.detect_conf}"
+                if self.local_detect and self.object_detail == "fine" else ""}
 
     def split_params(self) -> dict:
         """Parts that change only the erase/split step. Cached recognition (OCR, Claude) is reused when

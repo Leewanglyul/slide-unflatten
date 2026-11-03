@@ -196,3 +196,44 @@ def test_cache_key_changes_with_watermark_rule():
     from unflatten.config import Config
     on, off = Config(remove_watermark=True).cache_key_fields(), Config(remove_watermark=False).cache_key_fields()
     assert on["wm_rule"] >= 1 and off["wm_rule"] == 0
+
+
+def test_select_objects_keeps_individuals_drops_groups_parts_and_text():
+    from unflatten.detect import select_objects
+    from unflatten.types import Line
+    size = (1376, 768)
+    kids = [([359, 300, 484, 617], 0.94), ([532, 284, 674, 616], 0.94), ([697, 294, 832, 617], 0.95),
+            ([905, 288, 1068, 617], 0.95)]
+    dets = kids + [
+        ([461, 390, 895, 505], 0.72),     # puzzle strip held by the kids → kept
+        ([0, 0, 1348, 761], 0.93),        # whole slide → too big
+        ([355, 281, 1039, 620], 0.58),    # the group of kids → dropped (contains more-confident boxes)
+        ([697, 294, 835, 399], 0.53),     # a kid's head → part of a kept box
+        ([835, 423, 866, 455], 0.72),     # letter on the puzzle → too small
+        ([230, 646, 1142, 716], 0.57),    # subtitle pill, mostly text → dropped
+        ([1269, 746, 1366, 757], 0.29),   # watermark, low confidence
+    ]
+    lines = [Line(box=(290, 652, 1100, 710), text="[Subtitle] ...")]
+    objs = select_objects(dets, lines, size, conf=0.45, min_area=0.004, max_area=0.45)
+    boxes = sorted(o["box"] for o in objs)
+    assert boxes == sorted([b for b, _ in kids] + [[461, 390, 895, 505]])
+    assert [o["layer"] for o in objs] == list(range(len(objs)))
+    assert all(o["name"] == "개체" for o in objs)
+
+
+def test_local_detector_absent_falls_back(monkeypatch):
+    import builtins
+    from PIL import Image
+    from unflatten import detect
+    from unflatten.config import Config
+    real = builtins.__import__
+
+    def fake(name, *a, **k):
+        if name == "ultralytics":
+            raise ImportError("no ultralytics")
+        return real(name, *a, **k)
+    monkeypatch.setattr(builtins, "__import__", fake)
+    monkeypatch.setattr(detect, "_model", None)
+    logs = []
+    assert detect.detect_objects(Image.new("RGB", (64, 64)), [], Config(), logs.append) == []
+    assert logs and "unavailable" in logs[0]
