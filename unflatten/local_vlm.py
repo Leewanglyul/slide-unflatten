@@ -124,8 +124,10 @@ class LocalVLMService:
             self.output_tokens += int(resp.get("eval_count") or 0)
         content = (resp.get("message") or {}).get("content") or ""
         if resp.get("done_reason") == "length":
+            # the tail shows what the model was repeating (for tuning the prompt / schema later)
             raise LocalVLMError(f"answer cut off at {resp.get('eval_count')} tokens "
-                                f"(limit {self.cfg.local_vlm_max_answer}, prompt {resp.get('prompt_eval_count')})")
+                                f"(limit {self.cfg.local_vlm_max_answer}, prompt {resp.get('prompt_eval_count')}); "
+                                f"ends {content[-80:]!r}")
         try:
             return schema_model.model_validate_json(content)
         except Exception as e:   # malformed answer → the pipeline logs it and uses heuristics for this slide
