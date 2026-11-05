@@ -339,3 +339,25 @@ def test_local_vlm_retries_a_runaway_answer(flat_png, tmp_path, monkeypatch):
     assert bodies[1]["options"]["repeat_penalty"] > 1
     assert res.summaries[0].n_blocks >= 1 and res.vision == "local:qwen3-vl:8b"
 
+
+def test_local_vlm_reports_thinking_only_answer(flat_png, tmp_path, monkeypatch):
+    """All tokens went into the thinking field → logged as such (not as an empty JSON error)."""
+    from unflatten import local_vlm
+    monkeypatch.setattr(local_vlm.LocalVLMService, "_get", lambda self, p, timeout=5: {"models": [{"name": "qwen3-vl:8b"}]})
+    bodies = []
+
+    def post(self, p, body, timeout=600):
+        bodies.append(body)
+        return {"message": {"content": "", "thinking": "Let me look at the slide... " * 50}, "done_reason": "length",
+                "prompt_eval_count": 2000, "eval_count": 4096}
+    monkeypatch.setattr(local_vlm.LocalVLMService, "_post", post)
+    path, lines = flat_png
+    logs = []
+    cfg = Config(mode="text", language="en", vision_backend="ollama", out_dir=str(tmp_path / "out"),
+                 font_regular_file=FONT, font_bold_file=FONT_B)
+    convert(path, cfg, ocr_override=FakeOCR(lines), log=logs.append)
+    assert any("thinking" in str(m) for m in logs), logs
+    content = bodies[0]["messages"][0]["content"]
+    assert "/no_think" in content and "한 줄 JSON" in content
+    assert "highlights" not in str(bodies[0]["format"])          # short schema for local models
+

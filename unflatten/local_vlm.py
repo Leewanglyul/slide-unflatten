@@ -18,9 +18,29 @@ import urllib.request
 from typing import List, Optional, Tuple
 
 from PIL import Image
+from pydantic import BaseModel
 
-from .claude_client import OcrOut, SlideOut, _analysis_prompt
+from .claude_client import BlockOut, OcrOut, SlideOut, _analysis_prompt
 from .types import Line
+
+class LocalBlock(BaseModel):
+    """Short answer for a small local model: every field costs tokens, and long lists invite repetition."""
+    line_ids: List[int]
+    text: str
+    role: str                 # title | body | label
+    bold: bool
+    align: str                # left | center | right
+    bullet: bool
+
+
+class LocalSlideOut(BaseModel):
+    blocks: List[LocalBlock]
+    background_type: str      # flat | gradient | photo
+
+
+COMPACT = ("\n\n/no_think\n위 1~8번만 하세요(형광펜·워터마크·그림 개체는 답하지 않음). "
+           "생각 과정 없이, 줄바꿈과 들여쓰기 없는 한 줄 JSON으로만 답하세요.")
+
 
 class LocalVLMError(RuntimeError):
     """The local model answered, but not with usable JSON (logged by the pipeline, slide falls back to rules)."""
@@ -105,7 +125,7 @@ class LocalVLMService:
 
     def _chat_once(self, image_b64: str, prompt: str, schema_model, opts: dict):
         body = {"model": self.model, "stream": False,
-                "messages": [{"role": "user", "content": prompt + "\n\nJSON으로만 답하세요.", "images": [image_b64]}],
+                "messages": [{"role": "user", "content": prompt + COMPACT, "images": [image_b64]}],
                 "format": _inline_refs(schema_model.model_json_schema()),
                 # num_predict caps the answer: a whole slide fits in well under 4096 tokens, a runaway answer does not
                 "options": {"num_ctx": self.cfg.local_vlm_ctx, "num_predict": self.cfg.local_vlm_max_answer, **opts},
@@ -122,7 +142,12 @@ class LocalVLMService:
         with self._lock:
             self.input_tokens += int(resp.get("prompt_eval_count") or 0)
             self.output_tokens += int(resp.get("eval_count") or 0)
-        content = (resp.get("message") or {}).get("content") or ""
+        msg = resp.get("message") or {}
+        content = msg.get("content") or ""
+        thinking = msg.get("thinking") or ""
+        if resp.get("done_reason") == "length" and not content.strip() and thinking:
+            raise LocalVLMError(f"model spent all {resp.get('eval_count')} tokens thinking (no answer); "
+                                f"use a non-thinking model tag or a newer Ollama")
         if resp.get("done_reason") == "length":
             # the tail shows what the model was repeating (for tuning the prompt / schema later)
             raise LocalVLMError(f"answer cut off at {resp.get('eval_count')} tokens "
@@ -141,15 +166,16 @@ class LocalVLMService:
         listing = "\n".join(f"{i}: box={tuple(int(v * s) for v in l.box)} text={l.text!r}" for i, l in enumerate(lines))
         # objects and watermarks are left to detect.py / watermark.py (see module docstring)
         prompt = _analysis_prompt(sw, sh, listing, "none", False)
-        out = self._chat(data, prompt, SlideOut)
+        short = self._chat(data, prompt, LocalSlideOut)
         n = len(lines)
-        for b in out.blocks:                                   # drop ids a small model may invent
-            b.line_ids = [i for i in b.line_ids if 0 <= i < n]
-        out.blocks = [b for b in out.blocks if b.line_ids]
-        out.objects, out.watermarks = [], []
-        if out.background_type not in ("flat", "gradient", "photo"):
-            out.background_type = "flat"
-        return out
+        blocks = []
+        for b in short.blocks:
+            ids = [i for i in b.line_ids if 0 <= i < n]      # drop ids a small model may invent
+            if ids:
+                blocks.append(BlockOut(line_ids=ids, text=b.text, role=b.role, bold=b.bold, align=b.align,
+                                       bullet=b.bullet, highlights=[], highlight_color=None))
+        bg = short.background_type if short.background_type in ("flat", "gradient", "photo") else "flat"
+        return SlideOut(blocks=blocks, objects=[], background_type=bg, watermarks=[])
 
     def ocr_lines(self, img: Image.Image):
         """Last-resort OCR when no OCR engine is installed. Box quality depends on the model."""
