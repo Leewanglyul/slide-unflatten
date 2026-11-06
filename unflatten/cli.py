@@ -15,7 +15,7 @@ def _add_common(p: argparse.ArgumentParser):
     p.add_argument("--no-claude", action="store_true", help="heuristics only (no API calls)")
     p.add_argument("--vision", choices=["claude", "ollama"], default="claude",
                    help="who groups/corrects text: claude (API key) or ollama (local model, no key)")
-    p.add_argument("--local-model", default="qwen3-vl:8b", help="Ollama vision model tag for --vision ollama")
+    p.add_argument("--local-model", default="qwen3-vl:8b-instruct", help="Ollama vision model tag for --vision ollama")
     p.add_argument("--ocr", choices=["auto", "easyocr", "paddleocr", "claude", "none"], default="auto",
                    help="text recognition engine (paddleocr needs: pip install paddleocr paddlepaddle)")
     p.add_argument("--font", help="regular .ttf/.otf for body text")

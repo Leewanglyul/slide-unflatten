@@ -81,7 +81,7 @@ class Config:
     # Claude
     use_claude: bool = True
     vision_backend: str = "claude"          # claude | ollama (local model, no key, nothing leaves the computer)
-    local_vlm_model: str = "qwen3-vl:8b"    # any Ollama vision model tag
+    local_vlm_model: str = "qwen3-vl:8b-instruct"    # any Ollama vision model tag
     ollama_url: str = "http://localhost:11434"
     local_vlm_ctx: int = 16384              # context window passed to Ollama (image + OCR listing + answer)
     local_vlm_max_answer: int = 4096        # cap on answer tokens (a runaway, repeating answer is cut and retried)

@@ -6,7 +6,7 @@ roles / bold / align / bullets, background type. Picture objects come from the l
 watermarks from the rule (watermark.py), because open models often answer boxes in 0-1000 relative coordinates
 instead of pixels.
 
-Setup (Windows): install Ollama (https://ollama.com) → `ollama pull qwen3-vl:8b` → Config(vision_backend="ollama").
+Setup (Windows): install Ollama (https://ollama.com) → `ollama pull qwen3-vl:8b-instruct` → Config(vision_backend="ollama").
 """
 from __future__ import annotations
 

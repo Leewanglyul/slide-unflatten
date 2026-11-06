@@ -74,10 +74,10 @@ print(res.out_path, res.report_path, res.cost_line())
 |---|---|---|
 | 워터마크("A Gemini Notebook", "Made with Gamma" 등) | Claude + 규칙 | 규칙(`watermark.py`): 슬라이드 가장자리의 작은 글자 중 생성 도구 표시만 지움 |
 | 그림 속 사람·물건 찾기 (`--mode full`) | Claude 상자 | 로컬 탐지 모델 YOLOE(`detect.py`, ultralytics, 처음 한 번 약 90 MB 다운로드). 못 찾은 도형은 단순 분리. 끄기: `--no-local-detect` |
-| 오타 교정 · 문단 묶기 · 제목/본문 | Claude | `--vision ollama`: [Ollama](https://ollama.com)로 실행하는 로컬 비전 모델(기본 `qwen3-vl:8b`, VRAM 약 8 GB). 이미지가 컴퓨터 밖으로 나가지 않음. 없으면 규칙 기반 |
+| 오타 교정 · 문단 묶기 · 제목/본문 | Claude | `--vision ollama`: [Ollama](https://ollama.com)로 실행하는 로컬 비전 모델(기본 `qwen3-vl:8b-instruct`, VRAM 약 8 GB). 이미지가 컴퓨터 밖으로 나가지 않음. 없으면 규칙 기반 |
 
 ```bash
-ollama pull qwen3-vl:8b
+ollama pull qwen3-vl:8b-instruct   # 생각 과정 없는 Instruct 버전. 기본 태그 qwen3-vl:8b는 Thinking 버전이라 답을 못 내는 장이 생김
 unflatten convert deck.pptx --vision ollama              # 다른 모델: --local-model gemma4:12b
 ```
 로컬 모델에는 글자 묶기·교정만 맡기고, 그림 위치와 워터마크는 위의 탐지 모델과 규칙이 맡습니다

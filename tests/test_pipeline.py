@@ -255,11 +255,11 @@ def test_local_vlm_backend_groups_and_corrects_text(flat_png, tmp_path, monkeypa
     calls = []
 
     def fake_get(self, p, timeout=5):
-        return {"models": [{"name": "qwen3-vl:8b"}]}
+        return {"models": [{"name": "qwen3-vl:8b-instruct"}]}
 
     def fake_post(self, p, body, timeout=600):
         calls.append(body)
-        assert body["model"] == "qwen3-vl:8b" and body["messages"][0]["images"] and body["format"]["type"] == "object"
+        assert body["model"] == "qwen3-vl:8b-instruct" and body["messages"][0]["images"] and body["format"]["type"] == "object"
         assert "$ref" not in _json.dumps(body["format"])
         assert body["think"] is False
         out = {"blocks": [
@@ -277,7 +277,7 @@ def test_local_vlm_backend_groups_and_corrects_text(flat_png, tmp_path, monkeypa
                  font_regular_file=FONT, font_bold_file=FONT_B)
     res = convert(path, cfg, ocr_override=FakeOCR(bad), log=lambda *a: None)
     assert len(calls) == 1
-    assert res.vision == "local:qwen3-vl:8b" and res.cost_usd == 0 and "qwen3-vl:8b" in res.cost_line()
+    assert res.vision == "local:qwen3-vl:8b-instruct" and res.cost_usd == 0 and "qwen3-vl:8b-instruct" in res.cost_line()
     texts = [sh.text_frame.text for sh in iter_shapes(Presentation(res.out_path).slides[0].shapes) if sh.has_text_frame]
     assert "Polar Frontiers Report" in texts                       # corrected by the model
     assert res.summaries[0].n_blocks == 2
@@ -300,7 +300,7 @@ def test_local_vlm_unreachable_falls_back_to_heuristics(flat_png, tmp_path, monk
 
 def test_local_vlm_bad_answer_is_logged_and_falls_back(flat_png, tmp_path, monkeypatch):
     from unflatten import local_vlm
-    monkeypatch.setattr(local_vlm.LocalVLMService, "_get", lambda self, p, timeout=5: {"models": [{"name": "qwen3-vl:8b"}]})
+    monkeypatch.setattr(local_vlm.LocalVLMService, "_get", lambda self, p, timeout=5: {"models": [{"name": "qwen3-vl:8b-instruct"}]})
     monkeypatch.setattr(local_vlm.LocalVLMService, "_post", lambda self, p, body, timeout=600:
                         {"message": {"content": '{"blocks": [{"line_ids": [0], "te'}, "done_reason": "length",
                          "prompt_eval_count": 16000, "eval_count": 384})
@@ -317,7 +317,7 @@ def test_local_vlm_retries_a_runaway_answer(flat_png, tmp_path, monkeypatch):
     """1st answer runs away (cut off) → one retry with a repetition penalty; its good answer is used."""
     import json as _json
     from unflatten import local_vlm
-    monkeypatch.setattr(local_vlm.LocalVLMService, "_get", lambda self, p, timeout=5: {"models": [{"name": "qwen3-vl:8b"}]})
+    monkeypatch.setattr(local_vlm.LocalVLMService, "_get", lambda self, p, timeout=5: {"models": [{"name": "qwen3-vl:8b-instruct"}]})
     bodies = []
     good = {"blocks": [{"line_ids": [0], "text": "Polar Frontiers Report", "role": "title", "bold": True, "align": "left",
                         "bullet": False, "highlights": [], "highlight_color": None}],
@@ -337,13 +337,13 @@ def test_local_vlm_retries_a_runaway_answer(flat_png, tmp_path, monkeypatch):
     assert len(bodies) == 2
     assert bodies[0]["options"]["num_predict"] == 4096 and bodies[0]["options"]["temperature"] == 0
     assert bodies[1]["options"]["repeat_penalty"] > 1
-    assert res.summaries[0].n_blocks >= 1 and res.vision == "local:qwen3-vl:8b"
+    assert res.summaries[0].n_blocks >= 1 and res.vision == "local:qwen3-vl:8b-instruct"
 
 
 def test_local_vlm_reports_thinking_only_answer(flat_png, tmp_path, monkeypatch):
     """All tokens went into the thinking field → logged as such (not as an empty JSON error)."""
     from unflatten import local_vlm
-    monkeypatch.setattr(local_vlm.LocalVLMService, "_get", lambda self, p, timeout=5: {"models": [{"name": "qwen3-vl:8b"}]})
+    monkeypatch.setattr(local_vlm.LocalVLMService, "_get", lambda self, p, timeout=5: {"models": [{"name": "qwen3-vl:8b-instruct"}]})
     bodies = []
 
     def post(self, p, body, timeout=600):
